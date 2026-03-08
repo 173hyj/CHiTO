@@ -24,10 +24,12 @@ This repository contains the current public workspace used for corridor-guided p
 ## Workspace Structure
 
 ```text
-chito_public/
+chito_public
+
 └── src
     ├── CHiTO_Planner                # Main planning / optimization package
     ├── collision                    # Example collision scenes
     ├── hyj_ur5_robotiq_description  # UR5 + Robotiq robot description
     ├── planner                      # Additional planning / benchmark tools
     └── ur5_robotiq_moveit_config    # MoveIt configuration package
+/<img width="1913" height="1175" alt="fig5_overlays" src="https://github.com/user-attachments/assets/a3432dc1-1fac-49ce-969e-e4204a034ba1" />
