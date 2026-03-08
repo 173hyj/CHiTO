@@ -1,0 +1,28 @@
+plan_benchmark_scene3_gripper_waypoints:
+  ros__parameters:
+    planning_group: "manipulator"
+    planning_time: 50.0
+    velocity_scaling: 0.5
+    accel_scaling: 0.5
+
+    scene_root_dir: ""
+    scene_name: ""
+    scene_ext: ".scene"
+    world_frame: "world"
+
+    runs_per_planner: 50
+
+    pipelines: ["ompl","ompl"]
+    planners:
+      - "RRTConnectkConfigDefault"
+      - "PRMkConfigDefault"
+
+
+    per_run_csv: ""
+    summary_csv: ""
+
+    dump_traj_dir: ""
+    dump_first_success_only: false   # ✅ 每次成功都存
+
+    start_from_waypoint1: false
+

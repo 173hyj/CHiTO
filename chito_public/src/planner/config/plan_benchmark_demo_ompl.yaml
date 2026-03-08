@@ -1,0 +1,47 @@
+plan_benchmark_demo:
+  ros__parameters:
+    # --- PlanningSceneMonitor 开关 ---
+    start_world_geometry_monitor: false
+
+    # --- MoveIt 基本设置 ---
+   # planning_group: "arm"
+    planning_group: "ur_manipulator"
+    planning_time: 50.0
+    velocity_scaling: 0.5
+    accel_scaling: 0.5
+    #world_frame: "world"base_link \
+    world_frame: "base_link"
+    
+
+    # --- 从 RViz 导出的 .scene 读取障碍物 ---
+    scene_root_dir: 
+    scene_name: "1.5safety1"
+    scene_ext: ".scene"
+    
+    dump_traj_dir: 
+    dump_first_success_only: false
+
+
+    # --- 基准测试 ---
+    runs_per_planner: 50
+
+    # 注意：你的 C++ 要求 pipelines 和 planners 数量一致
+    #pipelines: ["ompl","ompl","ompl","ompl"]
+    pipelines: ["move_group","move_group","move_group","move_group"]
+    planners:
+      - "RRTConnectkConfigDefault"
+      - "ESTkConfigDefault"
+      - "PRMkConfigDefault"
+      - "PRMstarkConfigDefault"
+
+
+    q_start_deg: [27.0, -90.0, 90.0, 0.0, 75.6, 0.0]
+    q_goal_deg:  [97.0, -46.8, 50.4, -3.6, 99.0, 0.0 ]
+    # --- 起止关节角 ---
+    #q_start_deg: [39.0, -67.0, 63.0, -179.0, -97.0, -215.0]
+    #q_goal_deg:  [67.0, -98.0, 117.0, -134.0, -77.0, -212.0]
+
+    # --- 输出 CSV ---
+    per_run_csv: "/home/hyj/iris_rviz_ws/1.5benchmark_runs_scene1.csv"
+    summary_csv: "/home/hyj/iris_rviz_ws/1.5benchmark_summary_scene1.csv"
+

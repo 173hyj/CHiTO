@@ -1,0 +1,48 @@
+plan_benchmark_demo:
+  ros__parameters:
+    robot_description_kinematics:
+      arm:
+        kinematics_solver: kdl_kinematics_plugin/KDLKinematicsPlugin
+        kinematics_solver_search_resolution: 0.005
+        kinematics_solver_timeout: 0.1
+        kinematics_solver_attempts: 3
+    start_world_geometry_monitor: false
+    # --- MoveIt 基本设置 ---
+    planning_group: "arm"     # 改成你 SRDF 里的 JointModelGroup 名
+    planning_time: 50.0
+    velocity_scaling: 0.5
+    accel_scaling: 0.5
+    world_frame: "world"                 # 如你的模型以 base_link 为根，可改为 "base_link"
+
+    # --- 单障碍物（仅一个）---
+    obstacle_mesh: ""
+    # x y z r p y （位姿中的 rpy 单位是“弧度”）
+    obstacle_pose_xyz_rpy: [0.0, 0.00, 0.0, 0.0, 0.0, 0.0]
+    # 若 STL 以毫米计，这里常用 0.001→米
+    obstacle_scale_xyz: [0.001, 0.001, 0.001]
+
+    # --- 基准测试 ---
+    runs_per_planner: 50
+    planner_ids:
+      - TrajOptDefault
+      #- RRTConnectkConfigDefault
+      #- ESTkConfigDefault
+      #- PRMkconfigDefault
+      #- PRMstarkConfigDefault
+      #- RRTkConfigDefault
+      #- RRTstarkConfigDefault
+    #  - TRRTkConfigDefault
+    #  
+               # 只有在你已配置 CHOMP 时才会生效；否则可删掉这一行
+
+    # --- 起止关节角（两者选其一；*_deg 优先）---
+    # 注意长度要与 DOF 一致（UR5 为 6 个）
+    q_start_deg: [39.0,-67.0,63.0,-179.0,-97.0,-215.0]
+    q_goal_deg:  [67.0,-98.0,117.0,-134.0,-77.0,-212.0]
+    # 若想用弧度，请改用 q_start / q_goal（单位：rad）
+    # q_start: [0.0, -0.7854, 0.7854, 0.0, 0.7854, 0.0]
+    # q_goal:  [0.0, -1.5708, 1.5708, 0.0, 1.5708, 0.0]
+
+    # --- 输出 CSV ---
+    per_run_csv:   ""
+    summary_csv:   ""

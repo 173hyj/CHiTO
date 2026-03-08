@@ -1,0 +1,38 @@
+plan_benchmark_demo:
+  ros__parameters:
+    # --- PlanningSceneMonitor 开关 ---
+    start_world_geometry_monitor: false
+
+    # --- MoveIt 基本设置 ---
+    planning_group: "arm"
+    planning_time: 50.0
+    velocity_scaling: 0.5
+    accel_scaling: 0.5
+    world_frame: "world"
+
+    # --- 从 RViz 导出的 .scene 读取障碍物 ---
+    scene_root_dir: ""
+    scene_name: "1safety"
+    scene_ext: ".scene"
+
+    dump_traj_dir: ""
+    dump_first_success_only: false
+
+    # --- 基准测试 ---
+    runs_per_planner: 50
+
+    # CHOMP：pipeline 通常叫 "chomp"
+    pipelines: ["chomp"]
+
+    # planner_id：很多配置里是 "CHOMP"
+    planners:
+      - "CHOMP"
+
+    # --- 起止关节角 ---
+    q_start_deg: [39.0, -67.0, 63.0, -179.0, -97.0, -215.0]
+    q_goal_deg:  [67.0, -98.0, 117.0, -134.0, -77.0, -212.0]
+
+    # --- 输出 CSV ---
+    per_run_csv: ""
+    summary_csv: ""
+

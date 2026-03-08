@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>CHiTO_Planner</name>
+  <version>0.0.1</version>
+  <description>Corridor-guided hierarchical trajectory optimization and visualization tools for UR5 planning.</description>
+
+  <maintainer email="1060513765@qq.com">YiJie Huang</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- Core -->
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+
+  <!-- TF / MoveIt -->
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_eigen</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>moveit_core</depend>
+  <depend>moveit_ros_planning</depend>
+  <depend>moveit_ros_planning_interface</depend>
+  <depend>moveit_msgs</depend>
+  <depend>shape_msgs</depend>
+  <depend>trajectory_msgs</depend>
+
+  <!-- Others -->
+  <depend>eigen3_cmake_module</depend>
+  <depend>fcl</depend>
+
+  <exec_depend>yaml-cpp</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
