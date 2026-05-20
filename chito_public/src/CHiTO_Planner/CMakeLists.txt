@@ -65,6 +65,36 @@ if(NOT GUROBI_INCLUDE_DIR OR NOT GUROBI_CXX_LIB OR NOT GUROBI_CORE_LIB)
 endif()
 
 # =========================================================
+# CHiTO reusable algorithm modules
+# =========================================================
+add_library(chito_planner_core
+  src/core/convex_hull.cpp
+  src/core/robot_geometry.cpp
+  src/optimization/qp_solver.cpp
+)
+target_include_directories(chito_planner_core
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${GUROBI_INCLUDE_DIR}
+    ${EIGEN3_INCLUDE_DIRS}
+)
+ament_target_dependencies(chito_planner_core
+  rclcpp
+)
+target_link_libraries(chito_planner_core
+  ${GUROBI_CXX_LIB}
+  ${GUROBI_CORE_LIB}
+  fcl
+  Eigen3::Eigen
+  pthread
+)
+set_target_properties(chito_planner_core PROPERTIES
+  INSTALL_RPATH "${GUROBI_HOME}/lib"
+  BUILD_RPATH   "${GUROBI_HOME}/lib"
+)
+
+# =========================================================
 # 1. corridor_spacerrt_ik_viz
 # =========================================================
 add_executable(corridor_spacerrt_ik_viz_node
@@ -169,6 +199,7 @@ ament_target_dependencies(hierarchical_opt
   moveit_ros_planning_interface
 )
 target_link_libraries(hierarchical_opt
+  chito_planner_core
   ${GUROBI_CXX_LIB}
   ${GUROBI_CORE_LIB}
   fcl
@@ -218,6 +249,7 @@ target_link_libraries(scene_spacerrt_dh_ik_stats_withtorch
 # Install targets
 # =========================
 install(TARGETS
+  chito_planner_core
   corridor_spacerrt_ik_viz_node
   corridor_viz_moveit_ik
   corridor_viz_moveit_initik
@@ -226,7 +258,13 @@ install(TARGETS
   hierarchical_opt
   scene_spacerrt_dh_ik_stats
   scene_spacerrt_dh_ik_stats_withtorch
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY include/
+  DESTINATION include
 )
 
 # =========================
@@ -239,5 +277,8 @@ install(DIRECTORY launch/
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
 )
+
+ament_export_include_directories(include)
+ament_export_libraries(chito_planner_core)
 
 ament_package()
