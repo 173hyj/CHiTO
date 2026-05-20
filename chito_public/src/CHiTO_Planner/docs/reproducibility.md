@@ -25,7 +25,7 @@ source install/setup.bash
 2. Generate or load a convex corridor scene from `collision/convex_scene.yaml`.
 3. Run an initialization node to produce IK-feasible dense seeds.
 4. Run `hierarchical_opt` with `use_convexset_guidance:=true`.
-5. Enable `enable_final_global_smooth:=true` for the final refinement used in paper-style trajectory-quality comparisons.
+5. Enable `enable_final_global_smooth:=true` for the final refinement used in trajectory-quality comparisons.
 
 ## Key Metrics
 
@@ -37,4 +37,4 @@ The optimizer supports batch-mode CSV output for:
 - normalized path length
 - minimum clearance
 
-These metrics correspond to the paper's success-rate, efficiency, and trajectory-quality comparisons.
+These metrics support success-rate, efficiency, and trajectory-quality comparisons.

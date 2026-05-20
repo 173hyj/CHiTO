@@ -1,6 +1,6 @@
 # Method-to-Code Mapping
 
-This note maps the main CHiTO manuscript components to the implementation so that reviewers can audit the software against the paper.
+This note summarizes how the main modules of the CHiTO framework are organized in the software, making the corridor construction, IK initialization, optimization, and safety-checking stages easy to inspect.
 
 ## Convex-Set Corridor Guidance
 

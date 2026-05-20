@@ -22,11 +22,11 @@
 ## ROS Nodes
 
 - Initialization and visualization nodes remain as executable ROS nodes because they depend on parameters, MoveIt state, RViz markers, and experiment-specific logging.
-- `hierarchical_opt.cpp` now acts as the ROS node shell. Its algorithmic sections are included from `src/nodes/` so the code can be reviewed according to the same stages used in the paper.
+- `hierarchical_opt.cpp` acts as the ROS node shell. Its algorithmic sections are included from `src/nodes/` so the implementation can be reviewed according to the CHiTO pipeline stages.
 
 ## Design Rationale
 
-The structure separates paper-level algorithmic primitives from experiment orchestration:
+The structure separates algorithmic primitives from experiment orchestration:
 
 - core geometry can be inspected independently from ROS visualization
 - QP solving is isolated from trajectory-cost assembly
