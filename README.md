@@ -1,35 +1,41 @@
 # CHiTO
-Corridor-guided hierarchical trajectory optimization framework for manipulators
-# CHiTO
 
-**CHiTO** (Corridor-guided Hierarchical Trajectory Optimization) is a ROS 2 workspace for manipulator motion planning in cluttered environments.  
-It combines **workspace corridor generation**, **IK-feasible waypoint construction**, and **trajectory optimization / refinement** for collision-aware planning.
+**CHiTO** is a ROS 2 / MoveIt workspace for **Convex-Set-Guided Hierarchical Trajectory Optimization** of manipulators in cluttered and narrow workspaces.
 
-This repository contains the current public workspace used for corridor-guided planning experiments with a **UR5-based manipulator system**.
+The implementation follows the manuscript *Convex-Set-Guided Hierarchical Trajectory Optimization for Manipulators*. It combines workspace convex-set guidance, IK-feasible initialization, locally convexified quadratic optimization, continuous-time safety checking, and final trajectory refinement for UR5-based experiments.
 
----
+## Method Components
 
-## Features
+- **Convex-set scaffold**: expanded free-space convex sets are represented as half-space polytopes and organized as a feasible corridor sequence.
+- **IK-feasible initialization**: Cartesian anchors inside the corridor are converted into continuous joint-space waypoints through MoveIt IK and dynamic-programming branch selection.
+- **Hierarchical QP refinement**: collision and corridor terms are locally linearized, then solved as bounded quadratic subproblems with trust-region control.
+- **Continuous-time safety**: adjacent manipulator states are checked with swept link volumes to reduce interpolation-time collision risk.
+- **Global smoothing**: optional post-refinement improves trajectory continuity while retaining corridor and clearance guidance.
 
-- Workspace corridor construction from obstacle scenes
-- Corridor-guided waypoint / seed generation
-- IK-feasible path generation for manipulator motion
-- Hierarchical trajectory refinement
-- Trajectory optimization with collision-aware cost terms
-- Support for narrow-passage and constrained manipulation scenes
-- Visualization tools for corridor structure, IK paths, and optimized trajectories
-
----
-
-## Workspace Structure
+## Workspace Layout
 
 ```text
-chito_public
+chito_public/
+  src/
+    CHiTO_Planner/                 Main CHiTO algorithm package
+      include/chito_planner/       Reusable core and optimization interfaces
+      src/core/                    Geometry and swept-volume utilities
+      src/optimization/            Dense QP backend
+      src/nodes/                   Hierarchical optimizer implementation slices
+      src/*.cpp                    ROS nodes for initialization, optimization, and visualization
+      config/                      Optimization and kinematics parameters
+      launch/                      Experiment launch files
+      docs/                        Method-to-code and reproducibility notes
+    collision/                     Example obstacle and convex-scene descriptions
+    hyj_ur5_robotiq_description/   UR5 + end-effector description
+    planner/                       Benchmark and demo launch/configuration tools
+    ur5_robotiq_moveit_config/     MoveIt configuration package
+```
 
-└── src
-    ├── CHiTO_Planner                # Main planning / optimization package
-    ├── collision                    # Example collision scenes
-    ├── hyj_ur5_robotiq_description  # UR5 + Robotiq robot description
-    ├── planner                      # Additional planning / benchmark tools
-    └── ur5_robotiq_moveit_config    # MoveIt configuration package
+## Primary Entry Points
 
+- `corridor_viz_moveit_initik`: generates IK-feasible seed paths from convex-set corridors.
+- `hierarchical_opt`: runs the CHiTO hierarchical trajectory optimization and continuous safety refinement.
+- `scene_spacerrt_dh_ik_stats`: evaluates corridor-guided IK statistics for benchmark scenes.
+
+See [CHiTO_Planner/docs/method_mapping.md](chito_public/src/CHiTO_Planner/docs/method_mapping.md) and [CHiTO_Planner/docs/reproducibility.md](chito_public/src/CHiTO_Planner/docs/reproducibility.md) for the paper-to-code mapping and suggested experiment workflow.
