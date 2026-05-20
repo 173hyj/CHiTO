@@ -2,7 +2,7 @@
 
 **CHiTO** is a ROS 2 / MoveIt workspace for **Convex-Set-Guided Hierarchical Trajectory Optimization** of manipulators in cluttered and narrow workspaces.
 
-The implementation follows the manuscript *Convex-Set-Guided Hierarchical Trajectory Optimization for Manipulators*. It combines workspace convex-set guidance, IK-feasible initialization, locally convexified quadratic optimization, continuous-time safety checking, and final trajectory refinement for UR5-based experiments.
+The workspace provides the complete experimental software for the CHiTO framework, including workspace convex-set guidance, IK-feasible initialization, locally convexified quadratic optimization, continuous-time safety checking, and final trajectory refinement for UR5-based experiments.
 
 ## Method Components
 
@@ -38,4 +38,4 @@ chito_public/
 - `hierarchical_opt`: runs the CHiTO hierarchical trajectory optimization and continuous safety refinement.
 - `scene_spacerrt_dh_ik_stats`: evaluates corridor-guided IK statistics for benchmark scenes.
 
-See [CHiTO_Planner/docs/method_mapping.md](chito_public/src/CHiTO_Planner/docs/method_mapping.md) and [CHiTO_Planner/docs/reproducibility.md](chito_public/src/CHiTO_Planner/docs/reproducibility.md) for the paper-to-code mapping and suggested experiment workflow.
+See [CHiTO_Planner/docs/method_mapping.md](chito_public/src/CHiTO_Planner/docs/method_mapping.md) and [CHiTO_Planner/docs/reproducibility.md](chito_public/src/CHiTO_Planner/docs/reproducibility.md) for the method mapping and suggested experiment workflow.
