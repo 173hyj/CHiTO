@@ -204,6 +204,20 @@ void run_batch_and_write_csv_() {
     cur_iter_ = 0; total_global_attempts_ = 0;
 
     Metrics M = run_to_completion_collect_metrics_(batch_visualize_);
+    // Preserve the actual final iterate for reproducible motion visualization.
+    const auto trajectory_file = csv_out_ + "." + files[i].stem().string() + ".trajectory.csv";
+    std::ofstream trajectory(trajectory_file);
+    if (!trajectory) {
+      RCLCPP_ERROR(get_logger(), "cannot write trajectory: %s", trajectory_file.c_str());
+    } else {
+      trajectory << "idx,q1_rad,q2_rad,q3_rad,q4_rad,q5_rad,q6_rad\n";
+      trajectory << std::setprecision(17);
+      for (size_t t = 0; t < path_.size(); ++t) {
+        trajectory << t;
+        for (int k = 0; k < 6; ++k) trajectory << ',' << path_[t](k);
+        trajectory << '\n';
+      }
+    }
 
     // 这里在末尾加文件名列（用基础文件名；如需完整路径可改为 files[i].string()）
     const std::string file_col = csv_escape_(files[i].filename().string());

@@ -1,3 +1,4 @@
+#include "chito_planner/optimizer.hpp"
 #include <rclcpp/rclcpp.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -701,7 +702,11 @@ BuildSeedPathLikeCorridorViz(
     bool enable_intersection_ik,
     bool enable_joint_interp,
     int joint_interp_steps,
-    std::vector<Eigen::Vector3d>* used_samples = nullptr)
+    std::vector<Eigen::Vector3d>* used_samples = nullptr,
+    std::vector<int>* sigma = nullptr,
+    std::vector<Eigen::Vector3d>* anchors = nullptr,
+    std::vector<int>* ik_fallback = nullptr,
+    bool* intersection_ik_failed = nullptr)
 {
   using QVec = std::vector<Eigen::Matrix<double,6,1>, Eigen::aligned_allocator<Eigen::Matrix<double,6,1>>>;
   QVec out;
@@ -719,6 +724,8 @@ BuildSeedPathLikeCorridorViz(
   }
 
   out.push_back(q_start);
+  if (sigma) sigma->push_back(0);
+  if (ik_fallback) ik_fallback->push_back(0);
   Eigen::Matrix<double,6,1> q_curr = q_start;
 
   for (size_t i = 0; i < N; ++i) {
@@ -739,6 +746,9 @@ BuildSeedPathLikeCorridorViz(
       q_poly = (1.0 - alpha) * q_start + alpha * q_goal;
     }
 
+    if (anchors) anchors->push_back(sample_poly);
+    if (sigma) sigma->push_back(static_cast<int>(i));
+    if (ik_fallback) ik_fallback->push_back(ok_poly ? 0 : 1);
     if (used_samples) used_samples->push_back(sample_poly);
     out.push_back(q_poly);
     q_curr = q_poly;
@@ -760,8 +770,11 @@ BuildSeedPathLikeCorridorViz(
             if (!ok_inter) sample_inter = SamplePointIn(*H_inter, rng, &V_inter);
           }
 
+          if (!ok_inter && intersection_ik_failed) *intersection_ik_failed = true;
           if (ok_inter) {
             if (used_samples) used_samples->push_back(sample_inter);
+            if (sigma) sigma->push_back(static_cast<int>(i));
+            if (ik_fallback) ik_fallback->push_back(0);
             out.push_back(q_inter);
             q_curr = q_inter;
           }
@@ -771,9 +784,13 @@ BuildSeedPathLikeCorridorViz(
   }
 
   out.push_back(q_goal);
+  if (sigma) sigma->push_back(static_cast<int>(N-1));
+  if (ik_fallback) ik_fallback->push_back(0);
 
   if (enable_joint_interp && joint_interp_steps > 0) {
     out = InterpolateJointPath(out, joint_interp_steps);
+    if (sigma) sigma->clear();
+    if (ik_fallback) ik_fallback->clear();
   }
 
   return out;
@@ -784,7 +801,9 @@ BuildSeedPathLikeCorridorViz(
 // ============================================================
 class SceneSpaceRrtDhIkStatsNode : public rclcpp::Node {
 public:
-  SceneSpaceRrtDhIkStatsNode() : Node("scene_spacerrt_dh_ik_stats") {
+  SceneSpaceRrtDhIkStatsNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions(),
+      const chito_planner::OptimizerRequest* request = nullptr)
+      : Node("scene_spacerrt_dh_ik_stats", options) {
     frame_id_ = declare_parameter<std::string>("frame_id", "world");
     scene_file_ = declare_parameter<std::string>("scene_file", "");
     out_dir_ = declare_parameter<std::string>("out_dir", "/tmp/scene_spacerrt_stats");
@@ -830,12 +849,30 @@ public:
     ik_opt_.lambda     = declare_parameter<double>("ik_lambda", 3e-2);
 
     topic_ = declare_parameter<std::string>("topic", "/scene_spacerrt_stats_markers");
-    pub_ = create_publisher<MarkerArray>(topic_, rclcpp::QoS(rclcpp::KeepLast(10)).reliable().transient_local());
+    if (!request) pub_ = create_publisher<MarkerArray>(topic_, rclcpp::QoS(rclcpp::KeepLast(10)).reliable().transient_local());
 
-    fs::create_directories(out_dir_);
+    if (request) {
+      scene_file_ = request->scene_path;
+      lb_ = request->domain_lb; ub_ = request->domain_ub;
+      domain_ = HPolyhedron::MakeBox(lb_, ub_);
+      q_start_ = request->q_start; q_goal_ = request->q_goal;
+      T_align_.linear() = Eigen::AngleAxisd(request->base_yaw_deg * M_PI / 180.0,
+          Eigen::Vector3d::UnitZ()).toRotationMatrix();
+      T_align_.translation() = request->base_xyz;
+      derive_xyz_from_q_ = true;
+      max_iter_ = request->corridor_max_iterations;
+      scale_factor_ = request->sampling_scale;
+      stage_seed_ = request->random_seed;
+      stage_mode_ = true;
+      ik_opt_.max_iters = request->ik_max_iterations;
+      ik_opt_.pos_tol = request->ik_position_tolerance;
+      enable_joint_interp_ = false;
+      enable_intersection_ik_ = true;
+    } else fs::create_directories(out_dir_);
 
     if (!ParseSceneFile(scene_file_, scene_, get_logger())) {
       RCLCPP_FATAL(get_logger(), "Scene parse failed.");
+      if (request) throw std::runtime_error("Scene parse failed");
       rclcpp::shutdown();
       return;
     }
@@ -858,12 +895,59 @@ public:
                   goal_xyz_.x(), goal_xyz_.y(), goal_xyz_.z());
     }
 
+    if (request) return;
     run_batch_();
+    if (declare_parameter<bool>("exit_after_batch", false)) { rclcpp::shutdown(); return; }
 
     timer_ = create_wall_timer(std::chrono::milliseconds(500), [this](){ publish_last_markers_(); });
   }
 
+  chito_planner::GenerationResult generate() {
+    chito_planner::GenerationResult result;
+    const auto begin = std::chrono::steady_clock::now();
+    for (const auto& endpoint : {start_xyz_, goal_xyz_}) {
+      if ((endpoint.array() < lb_.array()-1e-9).any() ||
+          (endpoint.array() > ub_.array()+1e-9).any()) {
+        result.status = "invalid_input";
+        result.message = "Endpoint TCP lies outside workspace domain";
+        return result;
+      }
+    }
+    try {
+      std::vector<HPolyhedron> polys;
+      decltype(last_path_q_) path;
+      double seconds = 0., volume = 0.; int count = 0;
+      if (!plan_once_(0, seconds, volume, count, &polys, &path)) {
+        result.status = "corridor_failed";
+        result.message = "No connected corridor found";
+      } else {
+        result.seed.assign(path.begin(), path.end());
+        result.ik_fallback = last_ik_fallback_;
+        auto& guide = result.guide;
+        guide.q_seed_dense = result.seed;
+        guide.sigma_dense = last_sigma_;
+        guide.anchor_xyz = last_anchors_;
+        for (const auto& poly : polys) {
+          guide.poly_A.push_back(poly.A()); guide.poly_b.push_back(poly.b());
+        }
+        guide.loaded = true;
+        result.success = !intersection_ik_failed_ &&
+            std::none_of(result.ik_fallback.begin(), result.ik_fallback.end(),
+                         [](int flag) { return flag != 0; });
+        result.status = result.success ? "success" : "ik_failed";
+        if (!result.success) result.message = "Corridor sample IK failed; fallback rejected";
+      }
+    } catch (const std::exception& e) {
+      result.status = "corridor_failed"; result.message = e.what();
+    }
+    result.generation_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - begin).count();
+    return result;
+  }
+
 private:
+  bool stage_mode_{false}, intersection_ik_failed_{false};
+  std::uint32_t stage_seed_{0};
   void build_obstacles_from_scene_() {
     obstacles_.clear();
     obstacle_boxes_vertices_.clear();
@@ -930,13 +1014,34 @@ private:
     return path;
   }
 
+  std::vector<int> last_sigma_, last_ik_fallback_;
+  std::vector<Eigen::Vector3d> last_anchors_;
+  void save_guide_(const std::string& file, const std::vector<HPolyhedron>& polys,
+      const std::vector<Eigen::Matrix<double,6,1>, Eigen::aligned_allocator<Eigen::Matrix<double,6,1>>>& path) {
+    if (last_sigma_.size()!=path.size() || last_anchors_.size()!=polys.size()) {
+      RCLCPP_WARN(get_logger(), "Guide metadata omitted: interpolation or shape mismatch"); return;
+    }
+    std::ofstream f(file); f << std::setprecision(17);
+    f << "# Generation-time samples and associations; IK fallback flags retained.\n";
+    f << "q_seed_dense:\n";
+    for (const auto& q:path) { f << "  - ["; for(int k=0;k<6;++k) f << (k?", ":"") << q(k)*180.0/M_PI; f << "]\n"; }
+    f << "sigma_dense: ["; for(size_t i=0;i<last_sigma_.size();++i) f << (i?", ":"") << last_sigma_[i]; f << "]\n";
+    f << "ik_fallback_dense: ["; for(size_t i=0;i<last_ik_fallback_.size();++i) f << (i?", ":"") << last_ik_fallback_[i]; f << "]\n";
+    f << "poly_info:\n";
+    for(size_t j=0;j<polys.size();++j) {
+      const auto& p=last_anchors_[j]; f << "  - anchor_xyz: ["<<p.x()<<", "<<p.y()<<", "<<p.z()<<"]\n    A:\n";
+      for(int i=0;i<polys[j].A().rows();++i) f<<"      - ["<<polys[j].A()(i,0)<<", "<<polys[j].A()(i,1)<<", "<<polys[j].A()(i,2)<<"]\n";
+      f<<"    b: ["; for(int i=0;i<polys[j].b().size();++i) f<<(i?", ":"")<<polys[j].b()(i); f<<"]\n";
+    }
+  }
+
   bool plan_once_(int trial_idx,
                   double& time_sec,
                   double& corridor_volume,
                   int& poly_count,
                   std::vector<HPolyhedron>* final_polys,
                   std::vector<Eigen::Matrix<double,6,1>, Eigen::aligned_allocator<Eigen::Matrix<double,6,1>>>* path_q) {
-    std::mt19937 rng(rng_seed_ == 0 ? (unsigned)std::random_device{}() + trial_idx : (unsigned)rng_seed_ + trial_idx);
+    std::mt19937 rng(stage_mode_ ? stage_seed_ : rng_seed_ == 0 ? (unsigned)std::random_device{}() + trial_idx : (unsigned)rng_seed_ + trial_idx);
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -991,6 +1096,7 @@ private:
     corridor_volume = ComputeCorridorVolumeExact(*final_polys);
 
     std::vector<Eigen::Vector3d> used_samples;
+    last_sigma_.clear(); last_anchors_.clear(); last_ik_fallback_.clear();
     *path_q = BuildSeedPathLikeCorridorViz(
         *final_polys,
         start_xyz_,
@@ -1004,7 +1110,7 @@ private:
         enable_intersection_ik_,
         enable_joint_interp_,
         joint_interp_steps_,
-        &used_samples);
+        &used_samples, &last_sigma_, &last_anchors_, &last_ik_fallback_, &intersection_ik_failed_);
 
     auto t1 = std::chrono::steady_clock::now();
     time_sec = std::chrono::duration<double>(t1 - t0).count();
@@ -1041,6 +1147,7 @@ private:
         std::snprintf(buf_ik,   sizeof(buf_ik),   "%s/run_%03d_ik.csv",      out_dir_.c_str(), t);
         const bool ok_corr = SaveCorridorTxt(buf_corr, frame_id_, start_xyz_, goal_xyz_, polys);
         const bool ok_ik   = SaveJointPathCsv(buf_ik, path_q, save_q_in_degree_, 6);
+        save_guide_((fs::path(out_dir_) / (std::string("run_") + (t<10?"00":t<100?"0":"") + std::to_string(t) + "_guide.yaml")).string(), polys, path_q);
         if (!ok_corr || !ok_ik) {
           RCLCPP_WARN(get_logger(), "Save run files failed: corridor=%d ik=%d", ok_corr?1:0, ok_ik?1:0);
         }
@@ -1153,9 +1260,24 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
+namespace chito_planner::detail {
+GenerationResult generate_corridor(const OptimizerRequest& request, const rclcpp::NodeOptions& options) {
+  try {
+    return std::make_shared<SceneSpaceRrtDhIkStatsNode>(options, &request)->generate();
+  } catch (const std::exception& e) {
+    GenerationResult result; result.status = "corridor_failed"; result.message = e.what();
+    return result;
+  }
+}
+}
+
+#ifndef CHITO_STAGE_LIBRARY
 int main(int argc, char** argv) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<SceneSpaceRrtDhIkStatsNode>());
-  rclcpp::shutdown();
+  auto node = std::make_shared<SceneSpaceRrtDhIkStatsNode>();
+  if (rclcpp::ok()) rclcpp::spin(node);
+  if (rclcpp::ok()) rclcpp::shutdown();
   return 0;
 }
+
+#endif

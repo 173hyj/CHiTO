@@ -3,6 +3,32 @@ struct LocalQPOutcome {
     bool safe_now{false};
   };
 
+  LocalQPOutcome run_swept_local_qp_(const Eigen::Matrix<double,6,1>& a, Eigen::Matrix<double,6,1>& m, const Eigen::Matrix<double,6,1>& b) {
+    RCLCPP_INFO(get_logger(), "[SWEPT-QP] enabled midpoint optimization");
+    reset_local_state_all_();
+    Eigen::Matrix<double,6,1> center=0.5*(a+b);
+    double margin=std::max(cont_min_d_safe_,1e-4),weight=mu_local_;
+    auto gaps=[&](const Eigen::Matrix<double,6,1>& x) { Eigen::Vector2d h; h<<std::max(0.,margin-edge_swept_clearance_(a,x)),std::max(0.,margin-edge_swept_clearance_(x,b)); return h; };
+    auto merit=[&](const Eigen::Matrix<double,6,1>& x){return true_cost_local_(x,center)+0.5*weight*gaps(x).squaredNorm();};
+    bool changed=false; double trust=local_trust_s_;
+    for(int iter=0;iter<local_seg_max_iters_;++iter) {
+      if(edge_continuous_safe_convexbox_(a,m)&&edge_continuous_safe_convexbox_(m,b))return {true,true};
+      auto h=gaps(m); Eigen::MatrixXd Q=local_alpha_*Eigen::MatrixXd::Identity(6,6); Eigen::VectorXd c=-local_alpha_*center;
+      for(const auto& v:collect_violations_single_q_(m)) if(d_safe_>v.d) chito_planner::core::add_linearized_squared_hinge(d_safe_-v.d,-v.wn.transpose(),m,weight,Q,c);
+      for(int edge=0;edge<2;++edge) if(h(edge)>0.) { Eigen::VectorXd g(6); for(int k=0;k<6;++k) {auto plus=m,minus=m;plus(k)+=1e-4;minus(k)-=1e-4;g(k)=(gaps(plus)(edge)-gaps(minus)(edge))/2e-4;} chito_planner::core::add_linearized_squared_hinge(h(edge),g,m,weight,Q,c); }
+      bool accepted=false; double old=merit(m),oldedge=h.squaredNorm();
+      for(int attempt=0;attempt<max_trust_attempts_;++attempt) {
+        Eigen::VectorXd lb=(m.array()-trust).matrix().cwiseMax(qmin6_),ub=(m.array()+trust).matrix().cwiseMin(qmax6_);
+        if(fix_last_joint_to_zero_&&last_joint_index_>=0&&last_joint_index_<6)lb(last_joint_index_)=ub(last_joint_index_)=last_joint_fixed_value_;
+        auto sol=solve_qp_oldstyle(Q,c,lb,ub,m);
+        if(sol.solved&&sol.xnew.allFinite()) {Eigen::Matrix<double,6,1> candidate=sol.xnew;
+          if(merit(candidate)<old-1e-12&&gaps(candidate).squaredNorm()<=oldedge+1e-12&&min_true_distance_path_({candidate})>=std::min(stop_min_d_,min_true_distance_path_({m}))-1e-10) {m=candidate;changed=true;accepted=true;break;}}
+        trust*=0.5;
+      }
+      if(!accepted)break;
+    }
+    return {changed,edge_continuous_safe_convexbox_(a,m)&&edge_continuous_safe_convexbox_(m,b)};
+  }
   // ---------------- 连续性 pass（插中点 + 局部QP简版） ----------------
     // ===== 连续性修补：对单条 (qA -- qM -- qB) 做 6维局部QP，只调整 qM =====
 // ===== 连续性修补：对单条 (qA -- qM -- qB) 做 6维局部QP，只调整 qM =====
@@ -10,6 +36,7 @@ LocalQPOutcome run_local_qp_single_(const Eigen::Matrix<double,6,1>& qA,
                                     Eigen::Matrix<double,6,1>&       qM_io,
                                     const Eigen::Matrix<double,6,1>& qB)
 {
+  if(continuous_convexification_) return run_swept_local_qp_(qA,qM_io,qB);
   // ♻️ 每条边的局部QP开始前都重置“局部状态”
   reset_local_state_all_();
   LocalQPOutcome out;

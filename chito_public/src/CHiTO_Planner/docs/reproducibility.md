@@ -38,3 +38,19 @@ The optimizer supports batch-mode CSV output for:
 - minimum clearance
 
 These metrics support success-rate, efficiency, and trajectory-quality comparisons.
+
+## Open-source solver and optional corridor generation
+
+The OSQP backend requires native OSQP 1.x (`osqp::osqp`). It preserves
+`0.5*x.transpose()*Q*x + c.transpose()*x` and box bounds; only solved
+status with checked feasible bounds is accepted. No commercial solver license is needed.
+
+Use `-DCHITO_BUILD_CORRIDOR_TOOLS=OFF` to build the optimizer against supplied
+seed/corridor data without Drake. The default `ON` retains all corridor tools.
+Set `-DDRAKE_PREFIX=/opt/drake` (or `drake_DIR`) for a native Drake installation.
+Ubuntu 22.04 was validated with the official Drake 1.51.1 Jammy binary.
+CMake's imported Drake target supplies the required C++ standard.
+
+Validated native generator smoke: `scene_spacerrt_dh_ik_stats` with scene1,
+one trial, and `exit_after_batch=true`, producing seed CSV, corridor text,
+and exact generation-time guide YAML without a commercial license.

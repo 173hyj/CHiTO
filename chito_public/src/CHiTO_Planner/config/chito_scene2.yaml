@@ -1,0 +1,14 @@
+scene: scenes/scene2.scene
+q_start_deg: [39, -67, 63, -179, -97, -215]
+q_goal_deg: [67, -98, 117, -134, -77, -212]
+domain_lb: [-1, -1, 0]
+domain_ub: [1, 1, 1]
+base_yaw_deg: 180
+random_seed: 20262115
+final_smoothing: false
+
+# Complete pipeline preset
+translation_convexification: true
+accept_approximate_hull: true
+continuous_convexification: false
+export_intermediates: true

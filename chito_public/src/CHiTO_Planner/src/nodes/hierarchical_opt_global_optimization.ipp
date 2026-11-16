@@ -296,7 +296,10 @@ if (S > 1e6) {
                              const Eigen::VectorXd& lb,
                              const Eigen::VectorXd& ub,
                              const Eigen::VectorXd& x0) const {
-    return chito_planner::optimization::solve_box_qp(Q, c, lb, ub, x0);
+    ++qp_attempts_;
+    auto result = chito_planner::optimization::solve_box_qp(Q, c, lb, ub, x0);
+    if (result.solved) ++qp_solved_;
+    return result;
   }
 
   // ---------------- 迭代一步（单次模式） ----------------

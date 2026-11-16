@@ -384,7 +384,59 @@ ConvexHullData make_link_swept_hull_data_(const LinkBox& lbA, const LinkBox& lbB
 
 
 
-  bool edge_continuous_safe_convexbox_(const Eigen::Matrix<double,6,1>& qA,
+  double edge_swept_clearance_(const Eigen::Matrix<double,6,1>& qA,
+                                     const Eigen::Matrix<double,6,1>& qB) const {
+  if (obstacles_.empty()) return 1e3;
+  double clearance=1e3;
+
+  auto boxesA = build_link_boxes_for_q(qA);
+  auto boxesB = build_link_boxes_for_q(qB);
+
+  const int K_all = static_cast<int>(boxesA.size()); // 可能是 6 或 8
+
+  for (int k = 0; k < K_all; ++k) {
+    // Use a solid convex hull: triangle soups miss full containment and FCL's
+    // signed mesh/primitive fallback can assert when penetration contacts are absent.
+    const auto hull = make_link_swept_hull_data_(boxesA[k], boxesB[k]);
+    if (hull.verts.size() < 4 || hull.faces.size() < 4) return -1e3;
+    auto vertices = std::make_shared<std::vector<fcl::Vector3d>>();
+    std::vector<int> remap(hull.verts.size(), -1);
+    auto faces = std::make_shared<std::vector<int>>();
+    for (const auto& face : hull.faces) {
+      faces->push_back(3);
+      for (int j = 0; j < 3; ++j) {
+        const int index = face[j];
+        if (remap[index] < 0) { remap[index] = vertices->size(); vertices->push_back(hull.verts[index]); }
+        faces->push_back(remap[index]);
+      }
+    }
+    // FCL validates topology and falls back to exact linear vertex support
+    // when redundant coplanar faces are present; faces are not used for GJK.
+    auto geometry = std::make_shared<fcl::Convexd>(vertices, hull.faces.size(), faces, false);
+    auto swept = std::make_shared<fcl::CollisionObjectd>(geometry);
+    double best = std::numeric_limits<double>::infinity();
+    for (const auto& ob : obstacles_) {
+      fcl::CollisionRequestd collision_request; collision_request.enable_contact=true; collision_request.num_max_contacts=32;
+      fcl::CollisionResultd collision_result;
+      fcl::collide(swept.get(), ob.obj.get(), collision_request, collision_result);
+      if (collision_result.isCollision()) { std::vector<fcl::Contactd> contacts; collision_result.getContacts(contacts); double depth=1e-8; for(const auto& contact:contacts) depth=std::max(depth,contact.penetration_depth); clearance=std::min(clearance,-depth); continue; }
+      fcl::DistanceRequestd req;
+      req.enable_signed_distance = false;
+      fcl::DistanceResultd res;
+      const double d = fcl::distance(swept.get(), ob.obj.get(), req, res);
+      if (!std::isfinite(d) || d < 0.0) return -1e3;
+      best = std::min(best, d);
+      clearance=std::min(clearance,d);
+    }
+
+  }
+  return clearance;
+}
+
+
+
+
+    bool edge_continuous_safe_convexbox_(const Eigen::Matrix<double,6,1>& qA,
                                      const Eigen::Matrix<double,6,1>& qB) const {
   if (obstacles_.empty()) return true;
 
@@ -394,16 +446,37 @@ ConvexHullData make_link_swept_hull_data_(const LinkBox& lbA, const LinkBox& lbB
   const int K_all = static_cast<int>(boxesA.size()); // 可能是 6 或 8
 
   for (int k = 0; k < K_all; ++k) {
-    auto swept = make_swept_box_mesh_(boxesA[k], boxesB[k]);
-
+    // Use a solid convex hull: triangle soups miss full containment and FCL's
+    // signed mesh/primitive fallback can assert when penetration contacts are absent.
+    const auto hull = make_link_swept_hull_data_(boxesA[k], boxesB[k]);
+    if (hull.verts.size() < 4 || hull.faces.size() < 4) return false;
+    auto vertices = std::make_shared<std::vector<fcl::Vector3d>>();
+    std::vector<int> remap(hull.verts.size(), -1);
+    auto faces = std::make_shared<std::vector<int>>();
+    for (const auto& face : hull.faces) {
+      faces->push_back(3);
+      for (int j = 0; j < 3; ++j) {
+        const int index = face[j];
+        if (remap[index] < 0) { remap[index] = vertices->size(); vertices->push_back(hull.verts[index]); }
+        faces->push_back(remap[index]);
+      }
+    }
+    // FCL validates topology and falls back to exact linear vertex support
+    // when redundant coplanar faces are present; faces are not used for GJK.
+    auto geometry = std::make_shared<fcl::Convexd>(vertices, hull.faces.size(), faces, false);
+    auto swept = std::make_shared<fcl::CollisionObjectd>(geometry);
     double best = std::numeric_limits<double>::infinity();
     for (const auto& ob : obstacles_) {
+      fcl::CollisionRequestd collision_request;
+      fcl::CollisionResultd collision_result;
+      fcl::collide(swept.get(), ob.obj.get(), collision_request, collision_result);
+      if (collision_result.isCollision()) return false;
       fcl::DistanceRequestd req;
-      req.enable_signed_distance = true;
+      req.enable_signed_distance = false;
       fcl::DistanceResultd res;
-
-      double d = fcl::distance(swept.get(), ob.obj.get(), req, res);
-      if (d < best) best = d;
+      const double d = fcl::distance(swept.get(), ob.obj.get(), req, res);
+      if (!std::isfinite(d) || d < 0.0) return false;
+      best = std::min(best, d);
       if (best < cont_min_d_safe_) break;
     }
     if (best < cont_min_d_safe_) {

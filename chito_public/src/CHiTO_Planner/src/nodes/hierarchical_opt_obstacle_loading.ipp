@@ -136,6 +136,25 @@
         ob.obj      = obj;
         obs.push_back(std::move(ob));
       }
+      else if (typ == "sphere") {
+        // Legacy .scene stores radius, followed by four placeholder lines.
+        double r;
+        if (!(in >> r) || !std::isfinite(r) || r <= 0.0) {
+          RCLCPP_ERROR(get_logger(), "[OBST] invalid sphere radius in %s", scene_path.c_str());
+          return {};
+        }
+        skip_rest_of_line();
+        skip_n_lines(4);
+        const Eigen::Vector3d center(cx, cy, cz);
+        auto geom = std::make_shared<fcl::Sphered>(r);
+        auto obj = std::make_shared<fcl::CollisionObjectd>(geom);
+        Eigen::Isometry3d transform = Eigen::Isometry3d::Identity();
+        transform.translation() = center;
+        obj->setTransform(fcl::Transform3d(transform.matrix()));
+        obj->computeAABB();
+        obs.push_back({ObType::SPHERE, center, Eigen::Vector3d(2*r, 2*r, 2*r),
+                       Eigen::Vector3d::Zero(), obj});
+      }
       else if (typ == "cylinder") {
         // 5) 半径 + 高度
         double r, h;

@@ -20,7 +20,6 @@ void reset_global_state_on_new_package_() {
   csv_row_count_ = 0;
 
   // 4) 若有外部求解器/场景，做“软清理”
-  if (gurobi_model_) gurobi_model_->reset(); // 或者重建模型
   unsafe_edges_global_cache_.clear();
 }
 

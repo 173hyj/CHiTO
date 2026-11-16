@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>CHiTO_Planner</name>
-  <version>0.0.1</version>
+  <version>0.1.0</version>
   <description>Corridor-guided hierarchical trajectory optimization and visualization tools for UR5 planning.</description>
 
   <maintainer email="1060513765@qq.com">YiJie Huang</maintainer>
@@ -11,6 +11,7 @@
 
   <!-- Core -->
   <depend>rclcpp</depend>
+  <depend>ament_index_cpp</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>visualization_msgs</depend>
@@ -31,7 +32,7 @@
   <depend>eigen3_cmake_module</depend>
   <depend>fcl</depend>
 
-  <exec_depend>yaml-cpp</exec_depend>
+  <depend>yaml-cpp</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

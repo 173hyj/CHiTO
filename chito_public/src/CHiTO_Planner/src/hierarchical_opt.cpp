@@ -1,4 +1,6 @@
-﻿
+#include "chito_planner/core/continuous_penalty.hpp"
+
+#include "chito_planner/optimizer.hpp"
 #include <cstdio>   // for FILE*, popen, pclose
 #include <cstdlib>  // for std::getenv
 #include <map>
@@ -21,7 +23,7 @@
 
 
 #include <fcl/fcl.h>
-#include <gurobi_c++.h>
+
 
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -60,7 +62,9 @@ public:
       const rclcpp::NodeOptions& options =
         rclcpp::NodeOptions()
           .allow_undeclared_parameters(false)
-          .automatically_declare_parameters_from_overrides(false))
+          .automatically_declare_parameters_from_overrides(false),
+      const chito_planner::OptimizerRequest* request = nullptr,
+      const chito_planner::GenerationResult* generation = nullptr)
   : Node("qp_traj_opt", options)
   {
     // ... 浣犲師鏉ョ殑鏋勯€犱唬鐮佷繚鎸佷笉鍙?...
@@ -199,6 +203,7 @@ local_safe_iters_ = 0;  // 璁颁竴涓嬭繛缁€滃畨鍏ㄥ眬閮≦P鈥�
     last_joint_fixed_value_ = this->declare_parameter<double>("last_joint_fixed_value", 0.0);
     if (last_joint_index_ < 0 || last_joint_index_ > 5) {
       RCLCPP_FATAL(get_logger(), "last_joint_index must be in [0,5]");
+      if (request) throw std::runtime_error("invalid optimizer configuration or scene");
       rclcpp::shutdown(); return;
     }
 
@@ -210,7 +215,8 @@ local_safe_iters_ = 0;  // 璁颁竴涓嬭繛缁€滃畨鍏ㄥ眬閮≦P鈥�
         "joint_max", std::vector<double>(6,  2*M_PI));
       if (vmin.size()!=6 || vmax.size()!=6) {
         RCLCPP_FATAL(get_logger(), "joint_min/joint_max must have 6 elements");
-        rclcpp::shutdown(); return;
+        if (request) throw std::runtime_error("invalid optimizer configuration or scene");
+      rclcpp::shutdown(); return;
       }
       for (int i=0;i<6;++i){ qmin6_(i)=vmin[i]; qmax6_(i)=vmax[i]; }
     }
@@ -268,14 +274,17 @@ local_safe_iters_ = 0;  // 璁颁竴涓嬭繛缁€滃畨鍏ㄥ眬閮≦P鈥�
     // 鍒濆鍖栬矾寰勶細浼樺厛鏂囦欢
     init_q_file_ = this->declare_parameter<std::string>("init_q_file", "");
     bool init_from_file_ok=false;
-    if (!init_q_file_.empty()) {
+    if (!request && !init_q_file_.empty()) {
       std::vector<Eigen::Matrix<double,6,1>> qpath; bool is_deg=false;
       if (load_q_path_from_file_(init_q_file_, qpath, &is_deg) && qpath.size()>=2) {
         path_ = qpath; steps_=(int)path_.size(); q_start_=path_.front(); q_goal_=path_.back(); init_from_file_ok=true;
         RCLCPP_INFO(get_logger(), "[INIT] path from '%s' (%zu pts, unit=%s)", init_q_file_.c_str(), path_.size(), is_deg?"deg->rad":"rad");
       }
     }
-    if (!init_from_file_ok) {
+    if (request) {
+      path_ = generation->seed; steps_ = static_cast<int>(path_.size());
+      q_start_ = request->q_start; q_goal_ = request->q_goal;
+    } else if (!init_from_file_ok) {
       auto qs = this->declare_parameter<std::vector<double>>("q_start_deg",{39,-67,63,-179,-97,-215});
       auto qg = this->declare_parameter<std::vector<double>>("q_goal_deg",{67,-98,117,-134,-77,-212});
       bool as_deg = this->declare_parameter<bool>("start_goal_in_degree", true);
@@ -285,7 +294,8 @@ local_safe_iters_ = 0;  // 璁颁竴涓嬭繛缁€滃畨鍏ㄥ眬閮≦P鈥�
       RCLCPP_INFO(get_logger(), "[INIT] linear path %d pts", steps_);
     }
     // ===== Load convex-set guide if enabled =====
-if (use_convexset_guidance_) {
+if (request) { guide_ = generation->guide; use_convexset_guidance_ = guide_.loaded; }
+else if (use_convexset_guidance_) {
   bool ok = load_convexset_guide_from_yaml_(convexset_result_yaml_);
   if (!ok) {
     RCLCPP_WARN(get_logger(),
@@ -304,12 +314,13 @@ RCLCPP_INFO(get_logger(),
     fk_manual_q_deg_    = this->declare_parameter<std::vector<double>>(
         "fk_manual_q_deg", std::vector<double>{});
 
-    if (fk_manual_q_enable_) {
+    if (!request && fk_manual_q_enable_) {
       if (fk_manual_q_deg_.empty() || fk_manual_q_deg_.size() % 6 != 0) {
         RCLCPP_FATAL(get_logger(),
           "[FK-MANUAL] fk_manual_q_enable=true but fk_manual_q_deg has invalid size=%zu (must be 6*N)",
           fk_manual_q_deg_.size());
-        rclcpp::shutdown();
+        if (request) throw std::runtime_error("invalid optimizer configuration or scene");
+      rclcpp::shutdown();
         return;
       }
 
@@ -354,6 +365,17 @@ trust_s_base_   = trust_s_;
 alpha_base_     = alpha_;
 max_iters_base_ = max_iters_;
 
+  if (request) {
+    convex_scene_yaml = request->scene_path;
+    T_world_base_.translation() = request->base_xyz;
+    T_world_base_.linear() = Eigen::AngleAxisd(request->base_yaw_deg*M_PI/180., Eigen::Vector3d::UnitZ()).toRotationMatrix();
+    max_iters_ = request->optimization_max_iterations; d_safe_ = request->safety_distance;
+    continuous_convexification_ = request->continuous_convexification;
+    stop_min_d_ = request->minimum_clearance; cont_min_d_safe_ = request->continuous_clearance;
+    enable_final_global_smooth_ = false; fix_last_joint_to_zero_ = false;
+    use_poly_membership_penalty_ = true;
+    use_continuity_check_log_only_ = false;
+  }
   obstacles_ = build_obstacles_auto_(convex_scene_yaml);
 
   if (obstacles_.empty()) {
@@ -362,6 +384,7 @@ max_iters_base_ = max_iters_;
         "[OBST] failed to load obstacles from '%s' (YAML/.scene). "
         "Set require_obstacles:=false to bypass (not recommended).",
         convex_scene_yaml.c_str());
+      if (request) throw std::runtime_error("invalid optimizer configuration or scene");
       rclcpp::shutdown();
       return;
     } else {
@@ -377,6 +400,7 @@ max_iters_base_ = max_iters_;
 
 
     // 鍙鍖?
+    if (request) return;
         rclcpp::QoS qos(rclcpp::KeepLast(100));
     qos.reliable();
     if (qos_transient_local_) qos.transient_local();  // 鍙€夛細寮€鍚巻鍙叉寔涔呭寲
@@ -417,7 +441,66 @@ max_iters_base_ = max_iters_;
   bool do_batch_mode() const { return do_batch_mode_; }
   void run_batch_and_write_csv() { run_batch_and_write_csv_(); }
 
+  chito_planner::RefinementResult refine(const chito_planner::OptimizerRequest& r) {
+    if(r.translation_convexification) return refine_translation_(r);
+    chito_planner::RefinementResult out;
+    qp_attempts_ = qp_solved_ = 0;
+    const auto begin = Clock::now();
+    run_to_completion_collect_metrics_(false);
+    out.optimization_ms = std::chrono::duration<double,std::milli>(Clock::now()-begin).count();
+    auto valid = [&]() {
+      const auto validation = Clock::now();
+      auto finish = [&](bool ok) {
+        out.validation_ms += std::chrono::duration<double,std::milli>(Clock::now()-validation).count();
+        return ok;
+      };
+      bool finite = path_.size() >= 2;
+      for (const auto& q : path_) finite = finite && q.allFinite();
+      if (!finite) { out.waypoint_safe=false; out.continuous_safe=false; out.message="trajectory has fewer than two waypoints or non-finite joints"; return finish(false); }
+      out.minimum_distance = min_true_distance(path_);
+      out.waypoint_safe = out.minimum_distance >= r.minimum_clearance;
+      out.continuous_safe = true;
+      for (size_t i=1; i<path_.size(); ++i)
+        out.continuous_safe = edge_continuous_safe_convexbox_(path_[i-1],path_[i]) && out.continuous_safe;
+      const bool endpoints = (path_.front()-r.q_start).norm()<=1e-9 && (path_.back()-r.q_goal).norm()<=1e-9;
+      out.message.clear();
+      if (!out.waypoint_safe) out.message += "waypoint clearance below minimum; ";
+      if (!out.continuous_safe) out.message += "continuous edge clearance below minimum; ";
+      if (!endpoints) out.message += "trajectory endpoints changed; ";
+      return finish(out.waypoint_safe && out.continuous_safe && endpoints);
+    };
+    bool safe = valid();
+    // A point-safe path can still have unsafe connecting edges. Finish the
+    // existing local-repair stage within explicit work/size budgets.
+    for (int pass=0; !safe && out.waypoint_safe && pass<r.continuous_repair_passes; ++pass) {
+      if (path_.size()*2>static_cast<size_t>(r.repair_waypoint_limit)) break;
+      const auto repair=Clock::now();
+      const bool changed=run_continuity_pass_once_();
+      out.optimization_ms+=std::chrono::duration<double,std::milli>(Clock::now()-repair).count();
+      ++out.continuous_repairs;
+      safe=valid();
+      if (!changed) break;
+    }
+    const bool optimized = qp_solved_ > 0;
+    if (optimized && safe && r.final_smoothing) {
+      const auto backup = path_;
+      enable_final_global_smooth_ = true;
+      const auto smoothing = Clock::now();
+      run_final_global_smooth_();
+      out.optimization_ms += std::chrono::duration<double,std::milli>(Clock::now()-smoothing).count();
+      if (!valid()) { path_=backup; out.smoothing_rolled_back=true; }
+    }
+    const bool final_safe = valid();
+    out.success = optimized && final_safe;
+    out.status = !optimized ? "optimization_failed" : (final_safe ? "success" : "validation_failed");
+    if (!optimized) out.message = "no QP solved in " + std::to_string(qp_attempts_) + " attempts; " + out.message;
+    out.trajectory = path_;
+    out.normalized_length = path_length_normed(path_);
+    return out;
+  }
+
 private:
+  mutable std::size_t qp_attempts_{0}, qp_solved_{0};
 // ====== DH 鍙傛暟涓庡疄鐢ㄥ嚱鏁?======
 // 鈥斺€?鏀惧湪 QPTrajOptNode 鐨?private: 閲岋紝浠绘剰鍚堥€備綅缃?鈥斺€?
 // 绠€鍗?CSV 杞箟锛氳嫢鍖呭惈閫楀彿/寮曞彿/鎹㈣锛屽垯鐢ㄥ弻寮曞彿鍖呰９锛屽苟鎶婂唴閮ㄥ紩鍙烽噸澶嶄竴閬?
@@ -568,12 +651,13 @@ size_t csv_row_count_{0};
 
 // 鑻ヤ互鍚庢兂澶嶇敤涓€涓寔涔?Gurobi 妯″瀷锛岃繖閲岀暀涓€涓崰浣嶃€?
 // 鐩墠 solve_qp_oldstyle() 姣忔閮芥柊寤哄眬閮ㄦā鍨嬶紝鎵€浠ヤ负绌轰篃OK銆?
-std::unique_ptr<GRBModel> gurobi_model_;
+
 
 // 鍏ㄥ眬鈥滀笉瀹夊叏杈光€濈紦瀛橈紙鍜?per-iter 鐨?unsafe_edges_cache_ 鍖哄垎锛?
 std::vector<std::pair<Eigen::Matrix<double,6,1>, Eigen::Matrix<double,6,1>>> unsafe_edges_global_cache_;
 
   double local_trust_s_{0.10};
+  bool continuous_convexification_{false};
   double local_alpha_{1.0};
   double local_mu_scale_{1.0};
 
@@ -598,6 +682,7 @@ std::vector<std::string> xacro_args_;
 #include "nodes/hierarchical_opt_visualization.ipp"
 
 #include "nodes/hierarchical_opt_state.ipp"
+#include "nodes/hierarchical_opt_translation.ipp"
 
 // ======= DH kinematics (pure) =======
 double base_yaw_deg_{180.0};  // world->base 缁昛鐨勫亸缃紝榛樿 180掳
@@ -707,6 +792,7 @@ rclcpp::Clock::SharedPtr clock_;
 
 // ---------------- main ----------------
 // ---------------- main ----------------
+#ifndef CHITO_STAGE_LIBRARY
 int main(int argc, char** argv) {
   rclcpp::init(argc, argv);
 
@@ -728,3 +814,18 @@ int main(int argc, char** argv) {
 
 
 
+
+#endif
+
+namespace chito_planner::detail {
+RefinementResult refine_trajectory(const OptimizerRequest& r, const GenerationResult& g,
+                                   const rclcpp::NodeOptions& options) {
+  try {
+    if (!g.success || g.seed.size()<2) throw std::runtime_error("missing generated seed");
+    QPTrajOptNode node(options, &r, &g);
+    return node.refine(r);
+  } catch (const std::exception& e) {
+    RefinementResult out; out.status="optimization_failed"; out.message=e.what(); return out;
+  }
+}
+}
