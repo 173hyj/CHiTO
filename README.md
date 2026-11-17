@@ -23,14 +23,12 @@ Use `--scene scene2` or `--scene scene3` for the other presets, `--trials 5` for
 
 The formal preset uses the arm's six link collision boxes, **without a torch or gripper**. Corridor membership constrains TCP positions of original node copies; whole-arm obstacle checking remains separate. The default edge clearance is 5 mm, the point penalty activates at 50 mm, and final smoothing is off. Those are different quantities.
 
-## Method and results
+## Method and examples
 
 - [Formal method, constraints and code mapping](chito_public/src/CHiTO_Planner/docs/formal_method.md)
 - [C++ API, configuration and output contract](chito_public/src/CHiTO_Planner/docs/unified_optimizer.md)
 - [中文流程与运行说明](chito_public/src/CHiTO_Planner/docs/complete_pipeline.md)
-- [Frozen three-scene evaluation and replay instructions](benchmarks/split_corridor/README.md)
-
-On 15 frozen inputs across three scenes, the shared-endpoint and split methods each achieved **13/15 strict successes**; geometry checks passed **13/15 → 14/15**. Benefits were concentrated in scene1. The ten scene2/scene3 trajectories only gained identical duplicate nodes and checking overhead. These are optimization replays on saved corridor/IK outputs, not end-to-end generation success rates. Successful scene1 paths gained clearance and became longer.
+- [One complete example for each of the three scenes](examples/README.md)
 
 Final success requires fixed endpoints, point and swept-edge clearance checks, and corridor membership for every original internal copy. A geometrically safe path outside an assigned corridor remains a failure. Finite angular subdivision and endpoint hulls are approximate checks, not exact continuous collision detection.
 

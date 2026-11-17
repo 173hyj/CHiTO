@@ -54,4 +54,4 @@ colcon test --packages-select CHiTO_Planner --event-handlers console_direct+
 colcon test-result --verbose
 ```
 
-Regression tests cover analytical QPs, long-edge collisions, two-sided midpoint checking, objective consistency, revisiting failed nodes, collision-free repair windows, corridor halfspaces/FK membership, copy provenance/reset, strict final validation, public default splitting, configuration and API exports. `BUILD_TESTING=OFF` excludes diagnostic runners. See the benchmark replay instructions for frozen-input comparisons; they are separate from end-to-end CLI planning.
+Regression tests cover analytical QPs, long-edge collisions, two-sided midpoint checking, objective consistency, revisiting failed nodes, collision-free repair windows, corridor halfspaces/FK membership, copy provenance/reset, strict final validation, public default splitting, configuration and API exports. `BUILD_TESTING=OFF` excludes diagnostic runners. See [examples/](../../../../examples/README.md) for one complete runnable example per scene.
