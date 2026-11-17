@@ -1,0 +1,40 @@
+Internal ctest changing into directory: /work/chito-formal-20261117/build
+Test project /work/chito-formal-20261117/build
+      Start  1: repair_interpolation
+ 1/17 Test  #1: repair_interpolation ....................   Passed    0.00 sec
+      Start  2: qp_solver_analytical
+ 2/17 Test  #2: qp_solver_analytical ....................   Passed    0.01 sec
+      Start  3: swept_sphere_clearance
+ 3/17 Test  #3: swept_sphere_clearance ..................   Passed    0.01 sec
+      Start  4: unified_optimizer_contract
+ 4/17 Test  #4: unified_optimizer_contract ..............   Passed   15.20 sec
+      Start  5: unified_optimizer_configuration
+ 5/17 Test  #5: unified_optimizer_configuration .........   Passed    0.05 sec
+      Start  6: failed_node_revisited
+ 6/17 Test  #6: failed_node_revisited ...................   Passed   48.30 sec
+      Start  7: swept_merit_consistency
+ 7/17 Test  #7: swept_merit_consistency .................   Passed   15.46 sec
+      Start  8: long_joint_edge_collision
+ 8/17 Test  #8: long_joint_edge_collision ...............   Passed    0.35 sec
+      Start  9: local_feasibility_acceptance
+ 9/17 Test  #9: local_feasibility_acceptance ............   Passed    0.01 sec
+      Start 10: collision_free_window
+10/17 Test #10: collision_free_window ...................   Passed    0.01 sec
+      Start 11: corridor_moving_endpoint_constraints
+11/17 Test #11: corridor_moving_endpoint_constraints ....   Passed    0.01 sec
+      Start 12: corridor_endpoint_actual_arm
+12/17 Test #12: corridor_endpoint_actual_arm ............   Passed   10.52 sec
+      Start 13: corridor_endpoint_batch_reset
+13/17 Test #13: corridor_endpoint_batch_reset ...........   Passed    0.14 sec
+      Start 14: split_corridor_layout_acceptance
+14/17 Test #14: split_corridor_layout_acceptance ........   Passed    0.01 sec
+      Start 15: split_corridor_actual_arm
+15/17 Test #15: split_corridor_actual_arm ...............   Passed    4.75 sec
+      Start 16: split_corridor_public_validation_gate
+16/17 Test #16: split_corridor_public_validation_gate ...   Passed    0.15 sec
+      Start 17: formal_method_public_refinement
+17/17 Test #17: formal_method_public_refinement .........   Passed    0.74 sec
+
+100% tests passed, 0 tests failed out of 17
+
+Total Test time (real) =  95.69 sec

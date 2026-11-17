@@ -1,4 +1,4 @@
-scene: scenes/scene2.scene
+scene: ../../collision/scene2.scene
 q_start_deg: [39, -67, 63, -179, -97, -215]
 q_goal_deg: [67, -98, 117, -134, -77, -212]
 domain_lb: [-1, -1, 0]
@@ -7,8 +7,15 @@ base_yaw_deg: 180
 random_seed: 20262115
 final_smoothing: false
 
-# Complete pipeline preset
-translation_convexification: true
-accept_approximate_hull: true
-continuous_convexification: false
+# Formal CHiTO (six-link arm, without torch or gripper)
+formal_method: true
+translation_convexification: false
+accept_approximate_hull: false
+continuous_collision_refinement: false
+continuous_convexification: true
+repair_revisit_existing: true
+repair_interior_points: 1
+continuous_clearance: 0.005
+continuous_joint_step_deg: 1
+validate_original_scene: true
 export_intermediates: true

@@ -82,6 +82,8 @@ chito_planner::RefinementResult refine_translation_(const chito_planner::Optimiz
      path_=std::move(candidate);accepted=true;break;}}
   if(!accepted){trust*=.5;if(trust<1e-4)break;}else trust=std::min(.2,trust*1.2);
  }
+ std::string lower_stage;
+ if(request.continuous_collision_refinement)lower_stage=refine_remaining_collisions_(request);
  result.optimization_ms=std::chrono::duration<double,std::milli>(Clock::now()-begin).count();
  const auto check=Clock::now();double minimum=INFINITY;
  for(const auto& row:translation_planes_(path_))minimum=std::min({minimum,row.gap0,row.gap1});
@@ -95,6 +97,7 @@ chito_planner::RefinementResult refine_translation_(const chito_planner::Optimiz
  result.status=result.success?"success":(solved?"validation_failed":"optimization_failed");
  result.message="endpoint_box_envelope: initial_gap="+std::to_string(initial_gap)+", final_gap="+std::to_string(minimum)+", solved_QPs="+std::to_string(solved)+"; distinct endpoint orientations; translation-only Jacobians; no intervening rotation guarantee";
  result.message+="; baseline_point_min="+std::to_string(baseline_point_min)+", final_point_min="+std::to_string(min_true_distance_path_(path_));
+ result.message+=lower_stage;
  if(request.accept_approximate_hull)result.message+="; acceptance solely by FCL approximate endpoint hulls (plane gap is diagnostic only)";
  result.trajectory=path_;result.normalized_length=path_length_normed(path_);
  result.validation_ms=std::chrono::duration<double,std::milli>(Clock::now()-check).count();return result;

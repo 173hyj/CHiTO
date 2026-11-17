@@ -1,3 +1,5 @@
+> Historical raw-node documentation. For current supported defaults see [formal_method.md](formal_method.md) and [unified_optimizer.md](unified_optimizer.md).
+
 # Reproducibility Notes
 
 ## Environment Assumptions

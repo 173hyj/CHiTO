@@ -1,4 +1,9 @@
+#include "chito_planner/core/split_corridor.hpp"
+#include "chito_planner/core/corridor_endpoint.hpp"
+#include "chito_planner/core/repair_window.hpp"
+#include "chito_planner/core/local_acceptance.hpp"
 #include "chito_planner/core/continuous_penalty.hpp"
+#include "chito_planner/core/repair_interpolation.hpp"
 
 #include "chito_planner/optimizer.hpp"
 #include <cstdio>   // for FILE*, popen, pclose
@@ -100,6 +105,11 @@ public:
 
     alpha_    = this->declare_parameter<double>("alpha", 2.5);
     mu_       = this->declare_parameter<double>("mu", 0.8);
+    global_actual_acceptance_ = this->declare_parameter<bool>("global_actual_acceptance", false);
+    local_feasibility_first_ = this->declare_parameter<bool>("local_feasibility_first", false);
+    free_colliding_neighbors_ = this->declare_parameter<bool>("free_colliding_neighbors", false);
+    corridor_moving_endpoints_ = this->declare_parameter<bool>("corridor_moving_endpoints", false);
+    split_corridor_nodes_ = this->declare_parameter<bool>("split_corridor_nodes", false);
     d_safe_   = this->declare_parameter<double>("d_safe", 0.05);
     trust_s_  = this->declare_parameter<double>("trust_s", 0.2);
     // ===== Convex-set guidance =====
@@ -366,11 +376,25 @@ alpha_base_     = alpha_;
 max_iters_base_ = max_iters_;
 
   if (request) {
+    if(request->formal_method) {
+      global_actual_acceptance_ = true;
+      local_feasibility_first_ = true;
+      corridor_moving_endpoints_ = true;
+      split_corridor_nodes_ = true;
+      free_colliding_neighbors_ = false;
+      // The integrated generator and all formal validation stages use six links.
+      torch_enable_ = torch_in_collision_ = false;
+      gripper_enable_ = gripper_in_collision_ = false;
+    }
     convex_scene_yaml = request->scene_path;
     T_world_base_.translation() = request->base_xyz;
     T_world_base_.linear() = Eigen::AngleAxisd(request->base_yaw_deg*M_PI/180., Eigen::Vector3d::UnitZ()).toRotationMatrix();
     max_iters_ = request->optimization_max_iterations; d_safe_ = request->safety_distance;
     continuous_convexification_ = request->continuous_convexification;
+    repair_interior_points_ = request->repair_interior_points;
+    repair_revisit_existing_ = request->repair_revisit_existing;
+    continuous_joint_step_deg_ = request->continuous_joint_step_deg;
+    repair_waypoint_limit_ = request->repair_waypoint_limit;
     stop_min_d_ = request->minimum_clearance; cont_min_d_safe_ = request->continuous_clearance;
     enable_final_global_smooth_ = false; fix_last_joint_to_zero_ = false;
     use_poly_membership_penalty_ = true;
@@ -467,13 +491,14 @@ max_iters_base_ = max_iters_;
       if (!out.waypoint_safe) out.message += "waypoint clearance below minimum; ";
       if (!out.continuous_safe) out.message += "continuous edge clearance below minimum; ";
       if (!endpoints) out.message += "trajectory endpoints changed; ";
-      return finish(out.waypoint_safe && out.continuous_safe && endpoints);
+      if(!split_copy_corridor_safe_())out.message += "split copy outside assigned corridor; ";
+      return finish(out.waypoint_safe && out.continuous_safe && endpoints && split_copy_corridor_safe_());
     };
     bool safe = valid();
     // A point-safe path can still have unsafe connecting edges. Finish the
     // existing local-repair stage within explicit work/size budgets.
     for (int pass=0; !safe && out.waypoint_safe && pass<r.continuous_repair_passes; ++pass) {
-      if (path_.size()*2>static_cast<size_t>(r.repair_waypoint_limit)) break;
+      if (path_.size()>=static_cast<size_t>(r.repair_waypoint_limit)) break;
       const auto repair=Clock::now();
       const bool changed=run_continuity_pass_once_();
       out.optimization_ms+=std::chrono::duration<double,std::milli>(Clock::now()-repair).count();
@@ -493,13 +518,124 @@ max_iters_base_ = max_iters_;
     const bool final_safe = valid();
     out.success = optimized && final_safe;
     out.status = !optimized ? "optimization_failed" : (final_safe ? "success" : "validation_failed");
+    if(!split_copy_corridor_safe_())out.status="corridor_constraint_failed";
     if (!optimized) out.message = "no QP solved in " + std::to_string(qp_attempts_) + " attempts; " + out.message;
     out.trajectory = path_;
     out.normalized_length = path_length_normed(path_);
     return out;
   }
 
+  chito_planner::RefinementResult validate_raw(const chito_planner::OptimizerRequest& r, chito_planner::RefinementResult out) const {
+    const auto start=Clock::now();bool finite=path_.size()>=2;
+    for(const auto& q:path_)finite=finite&&q.allFinite();
+    out.waypoint_safe=out.continuous_safe=false;
+    if(finite){out.minimum_distance=min_true_distance_path_(path_);out.waypoint_safe=out.minimum_distance>=r.minimum_clearance;out.continuous_safe=true;
+      for(size_t i=1;i<path_.size();++i)out.continuous_safe=edge_continuous_safe_convexbox_(path_[i-1],path_[i])&&out.continuous_safe;
+      finite=(path_.front()-r.q_start).norm()<1e-9&&(path_.back()-r.q_goal).norm()<1e-9;}
+    const bool corridor_failed=out.status=="corridor_constraint_failed";
+    out.success=finite&&out.waypoint_safe&&out.continuous_safe&&!corridor_failed;out.status=corridor_failed?"corridor_constraint_failed":(out.success?"success":"validation_failed");
+    out.message+="; final_validation=original_uninflated_scene";
+    out.validation_ms+=std::chrono::duration<double,std::milli>(Clock::now()-start).count();return out;
+  }
+
+#ifdef CHITO_GLOBAL_DIAGNOSTICS
+public:
+void export_collision_view(std::ostream& o) const {
+  o<<std::setprecision(7);
+  auto vec=[&](const Eigen::Vector3d& p){o<<'['<<p.x()<<','<<p.y()<<','<<p.z()<<']';};
+  auto corners=[&](const Eigen::Isometry3d& T,const Eigen::Vector3d& size){
+    o<<'['; for(int i=0;i<8;++i){if(i)o<<',';Eigen::Vector3d p;for(int k=0;k<3;++k)p[k]=size[k]*((i>>k&1)?0.5:-0.5);vec(T*p);}o<<']';};
+  o<<"{\"obstacles\":[";
+  for(size_t i=0;i<obstacles_.size();++i){if(i)o<<',';const auto& ob=obstacles_[i];
+    o<<"{\"id\":"<<i<<",\"type\":"<<int(ob.type)<<",\"p\":";vec(ob.obj->getTranslation());
+    o<<",\"size\":";vec(ob.size);o<<",\"corners\":";corners(Eigen::Isometry3d(ob.obj->getTransform()),ob.size);o<<'}';}
+  o<<"],\"waypoints\":"<<path_.size()<<",\"frames\":[";
+  bool first=true;
+  for(size_t e=0;e+1<path_.size();++e){
+    const int n=std::max(1,int(std::ceil((path_[e+1]-path_[e]).cwiseAbs().maxCoeff()/(M_PI/180.))));
+    const int count=n+(e+2==path_.size());
+    for(int j=0;j<count;++j){
+      const double a=double(j)/n;auto q=((1-a)*path_[e]+a*path_[e+1]).eval();auto boxes=build_link_boxes_for_q(q);
+      std::array<Eigen::Isometry3d,7> chain;compute_fk_chain_(q,chain);
+      if(!first)o<<',';first=false;
+      o<<"{\"e\":"<<e<<",\"a\":"<<a<<",\"w\":"<<(j==0?int(e):(j==n?int(e+1):-1))<<",\"q\":[";
+      for(int k=0;k<6;++k){if(k)o<<',';o<<q[k];}o<<"],\"p\":[";
+      for(int k=0;k<7;++k){if(k)o<<',';vec(chain[k].translation());}
+      for(size_t k=6;k<boxes.size();++k){o<<',';vec(boxes[k].T*Eigen::Vector3d(0,0,boxes[k].size.z()/2));}
+      o<<"],\"links\":[";double minimum=1e9;int worstlink=-1,worstob=-1;Eigen::Vector3d pr,po;
+      std::vector<std::tuple<int,int,double,Eigen::Vector3d>> hits;
+      for(size_t k=0;k<boxes.size();++k){double lm=1e9;
+        for(size_t h=0;h<obstacles_.size();++h){
+          fcl::DistanceRequestd req;req.enable_nearest_points=true;req.enable_signed_distance=true;fcl::DistanceResultd res;
+          double d=fcl::distance(boxes[k].obj.get(),obstacles_[h].obj.get(),req,res);
+          if(!std::isfinite(d))throw std::runtime_error("nonfinite distance");
+          if(d<minimum){minimum=d;worstlink=k;worstob=h;pr=res.nearest_points[0];po=res.nearest_points[1];}
+          lm=std::min(lm,d);
+          if(d<0){fcl::CollisionRequestd cr;cr.enable_contact=true;cr.num_max_contacts=16;fcl::CollisionResultd cs;
+            fcl::collide(boxes[k].obj.get(),obstacles_[h].obj.get(),cr,cs);std::vector<fcl::Contactd> c;cs.getContacts(c);
+            Eigen::Vector3d pos=(res.nearest_points[0]+res.nearest_points[1])/2.;
+            double depth=-1;for(const auto& cc:c)if(cc.penetration_depth>depth){depth=cc.penetration_depth;pos=cc.pos;}
+            hits.emplace_back(k,h,d,pos);}
+        }if(k)o<<',';o<<lm;
+      }
+      o<<"],\"d\":"<<minimum<<",\"pair\":["<<worstlink<<','<<worstob<<"],\"near\":[";vec(pr);o<<',';vec(po);o<<"],\"hits\":[";
+      for(size_t h=0;h<hits.size();++h){if(h)o<<',';const auto& t=hits[h];o<<'['<<std::get<0>(t)<<','<<std::get<1>(t)<<','<<std::get<2>(t)<<',';vec(std::get<3>(t));o<<']';}
+      o<<"]}";
+    }
+  }o<<"]}";
+}
+
+#else
 private:
+#endif
+ bool global_actual_acceptance_{false};
+ bool local_feasibility_first_{false};
+ bool free_colliding_neighbors_{false};
+ bool global_capture_only_{false};
+
+  // Freeze normalization to keep acceptance weights consistent with the QP.
+  // The existing collision distance-gradient approximation is unchanged.
+  struct GlobalMeritScales {double smooth{1.},collision{1.},anchor{1.},poly{1.},overall{1.};};
+  mutable GlobalMeritScales global_merit_scales_;
+  double global_actual_merit_(const std::vector<Eigen::Matrix<double,6,1>>& p) const {
+    if(!global_actual_acceptance_)return smooth_cost(p)+true_penalty(p);
+    const auto& s=global_merit_scales_;
+    double value=0.5*alpha_/s.smooth*smooth_cost(p);
+    for(const auto& v:collect_violations(p))
+      value+=0.5*mu_/s.collision*std::pow(std::max(0.,d_safe_-v.d),2);
+    if(use_convexset_guidance_&&guide_.loaded){
+      if(use_anchor_pull_&&!guide_.anchor_xyz.empty()&&!guide_.sigma_dense.empty())
+        for(size_t t=0;t<p.size();++t){
+          int cell=t<guide_.sigma_dense.size()?guide_.sigma_dense[t]:0;
+          cell=std::max(0,std::min(cell,int(guide_.anchor_xyz.size())-1));
+          value+=lambda_corr_/s.anchor*(get_tcp_pose_world_(p[t]).translation()-guide_.anchor_xyz[cell]).norm();
+        }
+      if(use_poly_membership_penalty_&&!guide_.poly_A.empty()&&!guide_.poly_b.empty())
+        for(size_t t=0;t<p.size()&&t<guide_.sigma_dense.size();++t){
+          int cell=std::max(0,std::min(guide_.sigma_dense[t],int(guide_.poly_A.size())-1));
+          const auto& A=guide_.poly_A[cell];const auto& b=guide_.poly_b[cell];
+          if(A.cols()!=3||A.rows()!=b.size())continue;
+          const Eigen::Vector3d xyz=get_tcp_pose_world_(p[t]).translation();
+          for(int j=0;j<A.rows();++j)value+=0.5*lambda_poly_membership_/s.poly*std::pow(std::max(0.,A.row(j).dot(xyz)-b[j]),2);
+        }
+      if(use_seed_pull_)for(size_t t=0;t<p.size()&&t<guide_.q_seed_dense.size();++t)
+        value+=0.5*lambda_seed_q_*(p[t]-guide_.q_seed_dense[t]).squaredNorm();
+    }
+    return value/s.overall;
+  }
+  bool global_candidate_acceptable_(double predicted,double actual) const {
+    return std::isfinite(predicted)&&std::isfinite(actual)&&predicted>mi_thresh_&&actual>1e-12;
+  }
+  void trace_global_candidate_(const char* loop,int attempt,double model,double before,double after,bool accepted,bool forced) const {
+    const char* path=std::getenv("CHITO_GLOBAL_TRACE");if(!path)return;
+    std::ofstream o(path,std::ios::app);
+    o<<std::setprecision(17)<<"{\"loop\":\""<<loop<<"\",\"iter\":"<<cur_iter_<<",\"attempt\":"<<attempt
+     <<",\"mi\":"<<model<<",\"old\":"<<before<<",\"new\":"<<after<<",\"ti\":"<<before-after
+     <<",\"accepted\":"<<int(accepted)<<",\"forced\":"<<int(forced)<<",\"trust\":"<<trust_s_
+     <<",\"mu\":"<<mu_<<",\"alpha\":"<<alpha_<<",\"fixed\":"<<int(global_actual_acceptance_)<<"}\n";
+  }
+
+
   mutable std::size_t qp_attempts_{0}, qp_solved_{0};
 // ====== DH 鍙傛暟涓庡疄鐢ㄥ嚱鏁?======
 // 鈥斺€?鏀惧湪 QPTrajOptNode 鐨?private: 閲岋紝浠绘剰鍚堥€備綅缃?鈥斺€?
@@ -658,6 +794,9 @@ std::vector<std::pair<Eigen::Matrix<double,6,1>, Eigen::Matrix<double,6,1>>> uns
 
   double local_trust_s_{0.10};
   bool continuous_convexification_{false};
+  bool repair_revisit_existing_{false};
+  double continuous_joint_step_deg_{0.0};
+  int repair_interior_points_{1},repair_waypoint_limit_{std::numeric_limits<int>::max()};
   double local_alpha_{1.0};
   double local_mu_scale_{1.0};
 
@@ -675,6 +814,8 @@ std::vector<std::string> xacro_args_;
 
 #include "nodes/hierarchical_opt_global_optimization.ipp"
 
+#include "nodes/hierarchical_opt_corridor_endpoints.ipp"
+#include "nodes/hierarchical_opt_split_corridor.ipp"
 #include "nodes/hierarchical_opt_continuity.ipp"
 
 #include "nodes/hierarchical_opt_batch_io.ipp"
@@ -683,6 +824,7 @@ std::vector<std::string> xacro_args_;
 
 #include "nodes/hierarchical_opt_state.ipp"
 #include "nodes/hierarchical_opt_translation.ipp"
+#include "nodes/hierarchical_opt_collision_refinement.ipp"
 
 // ======= DH kinematics (pure) =======
 double base_yaw_deg_{180.0};  // world->base 缁昛鐨勫亸缃紝榛樿 180掳
@@ -818,8 +960,17 @@ int main(int argc, char** argv) {
 #endif
 
 namespace chito_planner::detail {
+RefinementResult validate_original_trajectory(const OptimizerRequest& r,const GenerationResult& generation,const RefinementResult& candidate,const rclcpp::NodeOptions& options){
+ if(candidate.trajectory.size()<2)return candidate;
+ auto input=generation;input.seed=candidate.trajectory;
+ QPTrajOptNode node(options,&r,&input);return node.validate_raw(r,candidate);
+}
 RefinementResult refine_trajectory(const OptimizerRequest& r, const GenerationResult& g,
                                    const rclcpp::NodeOptions& options) {
+  if(!formal_options_valid(r)) {
+    RefinementResult out;out.status="invalid_input";
+    out.message="Incompatible formal CHiTO refinement options";return out;
+  }
   try {
     if (!g.success || g.seed.size()<2) throw std::runtime_error("missing generated seed");
     QPTrajOptNode node(options, &r, &g);

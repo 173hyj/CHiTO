@@ -51,6 +51,8 @@
     return true;
   }
   bool load_convexset_guide_from_yaml_(const std::string& file) {
+  corridor_original_sigma_.clear();corridor_provenance_.clear();
+  split_corridor_initialized_=false;split_copy_roles_.clear();split_source_nodes_.clear();
   guide_ = ConvexSetGuideData{};
 
   if (file.empty()) {
@@ -271,6 +273,7 @@ void run_batch_and_write_csv_() {
       };
 
       const double m_old=model_value(Q,c,x0);
+      const double t_old=global_actual_merit_(path_old);
       bool accepted=false; QPResult last_sol; std::vector<Eigen::Matrix<double,6,1>> last_path;
 
       for (int attempt=0; attempt<max_trust_attempts_; ++attempt) {
@@ -281,11 +284,14 @@ void run_batch_and_write_csv_() {
         std::vector<Eigen::Matrix<double,6,1>> path_new=path_old;
         for(int t=0;t<T;++t)for(int k=0;k<K;++k) path_new[t](k)=sol.xnew(t*K+k);
         double MI = m_old - model_value(Q,c,sol.xnew);
-        if (MI > mi_thresh_) { path_=std::move(path_new); trust_s_=std::min(trust_s_max_,trust_s_+tau_plus_); accepted=true; break; }
+        const double t_new=global_actual_merit_(path_new),TI=t_old-t_new;
+        const bool acceptable=global_actual_acceptance_?global_candidate_acceptable_(MI,TI):(MI>mi_thresh_);
+        trace_global_candidate_("batch",attempt,MI,t_old,t_new,acceptable,false);
+        if (acceptable) { path_=std::move(path_new); trust_s_=std::min(trust_s_max_,trust_s_+tau_plus_); accepted=true; break; }
         last_sol=std::move(sol); last_path=std::move(path_new);
         const bool is_last=(attempt==max_trust_attempts_-1), at_min=(trust_s_<=trust_s_min_+1e-12);
         if (!is_last && !at_min){ trust_s_=std::max(trust_s_min_,trust_s_-tau_minus_); continue; }
-        if (last_sol.solved){ path_=std::move(last_path); accepted=true; trust_s_=std::min(trust_s_max_, std::max(trust_s_, trust_s_min_+0.05)); }
+        if (!global_actual_acceptance_ && last_sol.solved){trace_global_candidate_("batch",attempt,MI,t_old,t_new,true,true);path_=std::move(last_path); accepted=true; trust_s_=std::min(trust_s_max_, std::max(trust_s_, trust_s_min_+0.05)); }
         break;
       }
 
@@ -303,7 +309,7 @@ void run_batch_and_write_csv_() {
 
       if (stop) {
         // ******** 多轮连续修补（非 log-only）循环补丁：开始 ********
-        if (cont_after_global_only_) {
+        if (cont_after_global_only_ && !global_capture_only_) {
           for (int pass = 0; pass < 5; ++pass) {
             bool changed = run_continuity_pass_once_();
             if (visualize){ int idc=base_id_for_iter(cur_iter_); publish_markers_for_iter(path_,cur_iter_,idc); }

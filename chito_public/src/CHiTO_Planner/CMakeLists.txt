@@ -258,7 +258,15 @@ install(DIRECTORY launch/
 
 install(DIRECTORY config/
   DESTINATION share/${PROJECT_NAME}/config
+  PATTERN "chito_scene*.yaml" EXCLUDE
 )
+foreach(scene RANGE 1 3)
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/config/chito_scene${scene}.yaml" preset)
+  string(REPLACE "../../collision/" "scenes/" preset "${preset}")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/chito_scene${scene}.yaml" "${preset}")
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/chito_scene${scene}.yaml"
+    DESTINATION share/${PROJECT_NAME}/config)
+endforeach()
 
 ament_export_include_directories(include)
 ament_export_libraries(chito_planner_core)
@@ -289,6 +297,10 @@ endif()
 
 if(BUILD_TESTING)
   enable_testing()
+  add_executable(repair_interpolation_test tests/repair_interpolation_test.cpp)
+  target_include_directories(repair_interpolation_test PRIVATE include ${EIGEN3_INCLUDE_DIRS})
+  target_compile_options(repair_interpolation_test PRIVATE -UNDEBUG)
+  add_test(NAME repair_interpolation COMMAND repair_interpolation_test)
   add_executable(qp_solver_test tests/qp_solver_test.cpp src/optimization/qp_solver.cpp)
   target_include_directories(qp_solver_test PRIVATE include ${EIGEN3_INCLUDE_DIRS})
   target_link_libraries(qp_solver_test osqp::osqp Eigen3::Eigen)
@@ -316,4 +328,101 @@ ament_package()
 
 if(CHITO_BUILD_CORRIDOR_TOOLS)
 install(TARGETS corridor_spacerrt_ik_viz_node corridor_viz_moveit_ik corridor_viz_moveit_initik corridor_viz_moveit_initik_withtorch scene_spacerrt_dh_ik_stats scene_spacerrt_dh_ik_stats_withtorch DESTINATION lib/${PROJECT_NAME})
+endif()
+
+if(BUILD_TESTING AND CHITO_BUILD_UNIFIED_OPTIMIZER)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME failed_node_revisited COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/revisit_regression.py
+    $<TARGET_FILE:chito_optimizer>
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/revisit_scene1.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/../collision/scene1.scene
+    ${CMAKE_CURRENT_BINARY_DIR}/revisit-regression)
+
+  add_test(NAME swept_merit_consistency COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/swept_merit_regression.py
+    $<TARGET_FILE:chito_optimizer>
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/merit_scene3.yaml
+    ${CMAKE_CURRENT_SOURCE_DIR}/../collision/scene3.scene
+    ${CMAKE_CURRENT_BINARY_DIR}/merit-regression)
+endif()
+
+if(BUILD_TESTING AND CHITO_BUILD_UNIFIED_OPTIMIZER)
+add_executable(edge_audit tests/edge_audit.cpp)
+target_link_libraries(edge_audit chito_optimizer_library)
+ament_target_dependencies(edge_audit rclcpp)
+endif()
+
+if(BUILD_TESTING AND CHITO_BUILD_UNIFIED_OPTIMIZER)
+add_executable(subedge_regression tests/subedge_regression.cpp)
+target_link_libraries(subedge_regression chito_optimizer_library)
+ament_target_dependencies(subedge_regression rclcpp)
+add_test(NAME long_joint_edge_collision COMMAND subedge_regression
+ ${CMAKE_CURRENT_SOURCE_DIR}/tests/subedge_scene2.yaml
+ ${CMAKE_CURRENT_SOURCE_DIR}/tests/subedge_scene2.csv)
+endif()
+
+if(BUILD_TESTING)
+add_executable(global_acceptance_trial tests/global_acceptance_trial.cpp src/optimizer_config.cpp)
+target_link_libraries(global_acceptance_trial chito_planner_core osqp::osqp fcl pthread yaml-cpp Eigen3::Eigen)
+ament_target_dependencies(global_acceptance_trial rclcpp visualization_msgs geometry_msgs moveit_core moveit_ros_planning moveit_ros_planning_interface)
+endif()
+
+if(BUILD_TESTING)
+add_executable(local_acceptance_test tests/local_acceptance_test.cpp)
+target_compile_options(local_acceptance_test PRIVATE -UNDEBUG)
+target_include_directories(local_acceptance_test PRIVATE include)
+add_test(NAME local_feasibility_acceptance COMMAND local_acceptance_test)
+endif()
+
+if(BUILD_TESTING)
+add_executable(repair_window_test tests/repair_window_test.cpp)
+target_compile_options(repair_window_test PRIVATE -UNDEBUG)
+target_include_directories(repair_window_test PRIVATE include)
+add_test(NAME collision_free_window COMMAND repair_window_test)
+endif()
+
+if(BUILD_TESTING)
+add_executable(corridor_endpoint_test tests/corridor_endpoint_test.cpp)
+target_compile_options(corridor_endpoint_test PRIVATE -UNDEBUG)
+target_link_libraries(corridor_endpoint_test chito_planner_core osqp::osqp Eigen3::Eigen)
+add_test(NAME corridor_moving_endpoint_constraints COMMAND corridor_endpoint_test)
+endif()
+
+if(BUILD_TESTING)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/corridor_fixture)
+configure_file(tests/corridor_fixture/effective_config.yaml.in corridor_fixture/effective_config.yaml @ONLY)
+configure_file(tests/corridor_fixture/guide.yaml corridor_fixture/guide.yaml COPYONLY)
+configure_file(tests/corridor_fixture/seed.csv corridor_fixture/seed.csv COPYONLY)
+add_test(NAME corridor_endpoint_actual_arm COMMAND global_acceptance_trial
+ ${CMAKE_CURRENT_BINARY_DIR}/corridor_fixture ${CMAKE_CURRENT_BINARY_DIR}/corridor-check fixed corridor-check)
+add_test(NAME corridor_endpoint_batch_reset COMMAND global_acceptance_trial
+ ${CMAKE_CURRENT_BINARY_DIR}/corridor_fixture ${CMAKE_CURRENT_BINARY_DIR}/corridor-reset-check fixed corridor-reset-check)
+endif()
+
+if(BUILD_TESTING)
+add_executable(split_corridor_test tests/split_corridor_test.cpp)
+target_compile_options(split_corridor_test PRIVATE -UNDEBUG)
+target_include_directories(split_corridor_test PRIVATE include)
+add_test(NAME split_corridor_layout_acceptance COMMAND split_corridor_test)
+add_test(NAME split_corridor_actual_arm COMMAND global_acceptance_trial
+ ${CMAKE_CURRENT_BINARY_DIR}/corridor_fixture ${CMAKE_CURRENT_BINARY_DIR}/split-check fixed split-check)
+endif()
+
+if(BUILD_TESTING)
+add_test(NAME split_corridor_public_validation_gate COMMAND global_acceptance_trial
+ ${CMAKE_CURRENT_BINARY_DIR}/corridor_fixture ${CMAKE_CURRENT_BINARY_DIR}/split-public-check fixed split-public-gate-check)
+endif()
+
+if(BUILD_TESTING AND CHITO_BUILD_UNIFIED_OPTIMIZER)
+  add_executable(formal_method_test tests/formal_method_test.cpp)
+  target_link_libraries(formal_method_test chito_optimizer_library yaml-cpp)
+  target_compile_options(formal_method_test PRIVATE -UNDEBUG)
+  target_compile_definitions(formal_method_test PRIVATE CHITO_FORMAL_CONFIG="${CMAKE_CURRENT_BINARY_DIR}/corridor_fixture/effective_config.yaml")
+  add_test(NAME formal_method_public_refinement COMMAND formal_method_test)
+endif()
+
+if(BUILD_TESTING AND CHITO_BUILD_UNIFIED_OPTIMIZER)
+  add_executable(chito_replay tests/chito_replay.cpp)
+  target_link_libraries(chito_replay chito_optimizer_library yaml-cpp)
 endif()

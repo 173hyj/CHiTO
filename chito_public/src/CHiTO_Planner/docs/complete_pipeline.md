@@ -1,61 +1,36 @@
-# CHiTO 完整流程
+# CHiTO 正式流程
 
-当前预设固定为：走廊搜索 → IK → 原全局QP → 原局部插点/中点QP修补 → 两端盒子包络联合凸化 → 近似包络验收 → 导出。
+当前正式方法为：**走廊搜索 → IK → 实际代价验收的全局 QP → 共享节点左右拆分 → 各自原走廊内的局部 QP → 连接修补 → 原场景复验**。
 
-各阶段在同一个C++调用内传递数据。用户不用手动传递走廊或IK文件；保存的中间文件用于复查。
+起终点固定。每个内部共享节点拆成左右两份，分别参与两侧边优化，然后保留两份并检查连接。原节点副本的 TCP 必须留在各自原凸走廊内；新插入的修补点不强制 TCP 在走廊内。机械臂所有连杆仍需独立检查障碍物碰撞。
 
-## V100环境运行
+中点无碰撞不意味着修补完成：还要分别检查中点到两端的连接。局部窗口两侧的固定邻接点若碰撞，就扩展窗口；真正的 start/goal 碰撞则失败。候选需要同时通过受影响节点、内部边、外侧两条连接边和副本走廊检查。
 
-在现有 `codex-chito-humble` 容器内：
+## 构建和运行
+
+在装好 ROS 2 Humble/MoveIt、Drake、OSQP 1.x、FCL、Eigen、yaml-cpp 的环境中：
 
 ```bash
 source /opt/ros/humble/setup.bash
-source /work/repo/chito_public/install/setup.bash
-ros2 run CHiTO_Planner chito_optimizer --scene scene2 --output /work/chito-results/demo
-```
-
-切换 `scene1`、`scene2`、`scene3` 即可换场景。批量添加 `--trials 50`，随机种子依次递增；`--seed 20262115` 可指定起始种子。每次选用新输出目录。
-
-自定义场景/参数使用 `--config your.yaml` 代替 `--scene`。障碍物为支持盒子/球体的`.scene`格式；YAML用于优化器配置，不是障碍物几何格式。
-
-## 从源码构建
-
-解压后进入 `chito_public`，在已安装ROS Humble/MoveIt、FCL、Eigen、yaml-cpp、Drake和OSQP1.x的环境中运行：
-
-```bash
-colcon build --packages-select CHiTO_Planner --cmake-args -DDRAKE_PREFIX=/opt/drake -DBUILD_TESTING=ON
+cd chito_public
+colcon build --packages-select CHiTO_Planner --cmake-args \
+  -DCMAKE_BUILD_TYPE=Release -DDRAKE_PREFIX=/opt/drake -DBUILD_TESTING=ON
+colcon test --packages-select CHiTO_Planner --event-handlers console_direct+
+colcon test-result --verbose
 source install/setup.bash
-ros2 run CHiTO_Planner chito_optimizer --scene scene2 --output results/demo
+ros2 run CHiTO_Planner chito_optimizer --scene scene1 --output results/scene1
 ```
 
-## 每次输出
+可换成 `scene2`、`scene3`；`--trials 5` 连续运行五个随机种子，`--seed` 覆盖起始种子。每次使用新的输出目录。自定义配置用 `--config FILE`。正式 API 与三个预设默认启用 `formal_method: true`，无需实验环境变量。
 
-```text
-output/
-  summary.json
-  run_0/
-    result.json
-    effective_config.yaml
-    seed.csv
-    guide.yaml
-    trajectory.csv
-    playback.html
-  run_1/ ...
-```
+默认是**无焊枪、无夹爪的六连杆模型**。局部边目标裕度 5 mm；单点惩罚激活距离 50 mm；最终单点阈值 0 mm。这三个量用途不同。全局迭代上限 20，附加修补轮数 20，路径扩展上限 256，每次插入 1 点，允许重复修补已有失败节点，最终平滑默认关闭。
 
-早期生成失败时，尚未产生的初值/轨迹文件可以缺失；以result.json的阶段状态为准。playback.html是连杆示意回放，不是碰撞体网格。
+`hierarchical_opt` 原始 ROS 节点、旧 launch 文件和末端平移包络研究模式保留用于兼容；正式入口是 `chito_optimizer` 和 `CHiTOOptimizer::solve`。旧变体需要明确设置 `formal_method: false`。正式模式不允许混入另一套包络验收而绕过拆点流程。
 
-result.json记录成功/失败、失败原因、时长、模型标签以及离散优化前后点间距诊断。summary.json统计批量成功、规划失败及导出失败。进程退出码：0全部成功；1存在规划失败；2配置/参数错误；3导出失败。
+## 输出与判定
 
-## 固定的模型与保护
+每次运行导出 JSON 状态、有效配置、关节轨迹 CSV 和 HTML 连杆回放。启用中间导出后还有原始走廊/IK 节点和 guide。原始副本越出指定走廊时，即使几何无碰撞也保留 `corridor_constraint_failed`，原场景复验不会将它改判成功。
 
-- 原离散优化结果作为新增凸化起点。
-- 新更新不能破坏已有离散可行性；未离散可行时最小点间距不能恶化。
-- 两端盒子各保留实际方向和尺寸，共同决定凸包络。
-- QP中只线性化两端中心平移；每轮重建包络和分离平面。
-- 全局QP含两端约束、固定起终点、关节/信赖域边界及非负松弛变量。
-- 提供的预设启用 `translation_convexification: true`、`accept_approximate_hull: true`，最终按FCL近似端点凸包验收。
-- 最终全局平滑关闭，之前的中点扫掠软惩罚实验关闭。
-- 这是近似包络判据，不是对中间旋转或硬件运动的安全证明。
+[三场景回放](../../../../benchmarks/split_corridor/README.md)：每场景五组相同输入，完整成功 13/15 → 13/15，几何通过 13/15 → 14/15。改善集中在 scene1；scene2/3 的十组只是增加重合副本与检查开销。scene1 成功案例间隙增加，关节路径也变长。回放固定走廊/IK 结果，不代表端到端随机生成成功率。
 
-流程完整不代表所有任务都能规划成功。当前连续包络求解能力仍有限，失败会保留诊断，不会通过降低判据伪装成成功。
+当前是无条件拆共享节点，尚未实现仅在困难边触发。有限角度细分与端点凸包检查不等价于精确连续碰撞检测。

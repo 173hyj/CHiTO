@@ -10,6 +10,26 @@
 #include <stdexcept>
 namespace chito_planner {
 namespace {
+struct InflatedScene {
+  std::filesystem::path temporary;
+  ~InflatedScene(){if(!temporary.empty()){std::error_code e;std::filesystem::remove(temporary,e);}}
+  std::string create(const std::string& source,double radius){
+    std::ifstream in(source);if(!in)throw std::runtime_error("Cannot read original scene");
+    std::vector<std::string> lines;std::string line;while(std::getline(in,line))lines.push_back(line);
+    int changed=0;
+    for(size_t i=0;i<lines.size();++i)if(!lines[i].empty()&&lines[i][0]=='*'){
+      if(i+5>=lines.size())throw std::runtime_error("Malformed inflation input");
+      std::istringstream kind(lines[i+4]),dims(lines[i+5]);std::string type;kind>>type;std::ostringstream out;out<<std::setprecision(17);
+      if(type=="box"){double x,y,z;if(!(dims>>x>>y>>z)||x<=0||y<=0||z<=0)throw std::runtime_error("Invalid box");out<<x+2*radius<<' '<<y+2*radius<<' '<<z+2*radius;}
+      else if(type=="sphere"){double r;if(!(dims>>r)||r<=0)throw std::runtime_error("Invalid sphere");out<<r+radius;}
+      else throw std::runtime_error("Inflation supports scene box/sphere only");
+      lines[i+5]=out.str();++changed;
+    }
+    if(!changed)throw std::runtime_error("No inflation primitives found");
+    temporary=std::filesystem::temp_directory_path()/("chito-inflated-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".scene");
+    std::ofstream out(temporary);out.exceptions(std::ios::failbit|std::ios::badbit);for(const auto& s:lines)out<<s<<'\n';out.close();return temporary.string();
+  }
+};
 using Clock = std::chrono::steady_clock;
 double milliseconds(Clock::time_point start) {
   return std::chrono::duration<double,std::milli>(Clock::now()-start).count();
@@ -39,6 +59,7 @@ void export_result(const OptimizerRequest& request, const OptimizerResult& resul
     throw std::runtime_error("Output already contains a CHiTO result; choose a fresh output directory");
   if (!result.refinement.trajectory.empty()) write_path(folder/"trajectory.csv",result.refinement.trajectory);
   YAML::Node cfg;
+  cfg["formal_method"]=request.formal_method;
   cfg["scene"]=std::filesystem::absolute(request.scene_path).string();
   yaml_vector(cfg["q_start_rad"],request.q_start); yaml_vector(cfg["q_goal_rad"],request.q_goal);
   yaml_vector(cfg["domain_lb"],request.domain_lb); yaml_vector(cfg["domain_ub"],request.domain_ub);
@@ -46,12 +67,17 @@ void export_result(const OptimizerRequest& request, const OptimizerResult& resul
   cfg["random_seed"]=request.random_seed; cfg["final_smoothing"]=request.final_smoothing;
   cfg["translation_convexification"]=request.translation_convexification;
   cfg["accept_approximate_hull"]=request.accept_approximate_hull;
+  cfg["continuous_collision_refinement"]=request.continuous_collision_refinement;
+  cfg["obstacle_inflation"]=request.obstacle_inflation;cfg["validate_original_scene"]=request.validate_original_scene;
   cfg["corridor_max_iterations"]=request.corridor_max_iterations; cfg["sampling_scale"]=request.sampling_scale;
   cfg["ik_max_iterations"]=request.ik_max_iterations; cfg["ik_position_tolerance"]=request.ik_position_tolerance;
   cfg["optimization_max_iterations"]=request.optimization_max_iterations;
   cfg["continuous_repair_passes"]=request.continuous_repair_passes;cfg["repair_waypoint_limit"]=request.repair_waypoint_limit;
+  cfg["repair_interior_points"]=request.repair_interior_points;
+  cfg["repair_revisit_existing"]=request.repair_revisit_existing;
   cfg["safety_distance"]=request.safety_distance; cfg["minimum_clearance"]=request.minimum_clearance;
   cfg["continuous_clearance"]=request.continuous_clearance;
+  cfg["continuous_joint_step_deg"]=request.continuous_joint_step_deg;
   cfg["continuous_convexification"]=request.continuous_convexification;
   cfg["export_intermediates"]=request.export_intermediates;
   std::ofstream config(folder/"effective_config.yaml");config.exceptions(std::ios::failbit|std::ios::badbit);config << cfg;config.close();
@@ -75,6 +101,8 @@ void export_result(const OptimizerRequest& request, const OptimizerResult& resul
   out << "{\n\"success\":" << result.success << ",\n\"status\":" << quote(result.status)
       << ",\n\"validation_model\":" << quote(request.translation_convexification?(request.accept_approximate_hull?"approximate_endpoint_hull_acceptance":"endpoint_boxes_translation_linearization"):"endpoint_swept_hulls")
       << ",\n\"message\":" << quote(result.message) << ",\n\"seed\":" << request.random_seed
+      << ",\n\"obstacle_inflation\":" << request.obstacle_inflation
+      << ",\n\"final_scene\":" << quote((request.validate_original_scene||request.obstacle_inflation>0)?"original_uninflated":"planning_scene")
       << ",\n\"generation_ms\":" << number(result.generation.generation_ms)
       << ",\n\"optimization_ms\":" << number(result.refinement.optimization_ms)
       << ",\n\"validation_ms\":" << number(result.refinement.validation_ms)
@@ -103,26 +131,33 @@ OptimizerResult CHiTOOptimizer::solve(const OptimizerRequest& request) const {
   const bool finite= request.q_start.allFinite() && request.q_goal.allFinite() && request.domain_lb.allFinite() && request.domain_ub.allFinite() && request.base_xyz.allFinite();
   std::error_code scene_error;
   const bool valid_scene=std::filesystem::is_regular_file(request.scene_path,scene_error);
-  if (!finite || request.scene_path.empty() || !valid_scene || std::filesystem::path(request.scene_path).extension()!=".scene"
+  if ((!formal_options_valid(request)) || !finite || request.scene_path.empty() || !valid_scene || std::filesystem::path(request.scene_path).extension()!=".scene"
       || !(request.domain_lb.array()<request.domain_ub.array()).all() || !std::isfinite(request.base_yaw_deg)
       || request.corridor_max_iterations<1 || request.ik_max_iterations<1 || request.optimization_max_iterations<1
       || request.continuous_repair_passes<0 || request.repair_waypoint_limit<2
+      || request.repair_interior_points<1 || request.repair_interior_points>31
       || !std::isfinite(request.sampling_scale) || request.sampling_scale<=0 || request.sampling_scale>1
       || !std::isfinite(request.ik_position_tolerance) || request.ik_position_tolerance<=0
       || !std::isfinite(request.safety_distance) || request.safety_distance<0
       || !std::isfinite(request.minimum_clearance) || request.minimum_clearance<0
+      || !std::isfinite(request.continuous_joint_step_deg) || request.continuous_joint_step_deg<0
       || !std::isfinite(request.continuous_clearance) || request.continuous_clearance<0) {
     result.status="invalid_input";result.message="Invalid scene, joint values, bounds, seed or solver settings";result.total_ms=milliseconds(started);return result;
   }
   std::string phase="corridor_failed";
+  if(!std::isfinite(request.obstacle_inflation)||request.obstacle_inflation<0){result.status="invalid_input";result.message="Invalid obstacle inflation";return result;}
   try {
+    InflatedScene inflated;auto planning=request;
+    if(request.obstacle_inflation>0)planning.scene_path=inflated.create(request.scene_path,request.obstacle_inflation);
     auto context=std::make_shared<rclcpp::Context>();context->init(0,nullptr);
     struct Guard {std::shared_ptr<rclcpp::Context> ctx;~Guard(){if(ctx->is_valid())ctx->shutdown("CHiTO solve finished");}} guard{context};
     rclcpp::NodeOptions options;options.context(context);options.use_global_arguments(false);
-    result.generation=detail::generate_corridor(request,options);
+    result.generation=detail::generate_corridor(planning,options);
     if (!result.generation.success) { result.status=result.generation.status;result.message=result.generation.message;return finish(); }
     phase="optimization_failed";
-    result.refinement=detail::refine_trajectory(request,result.generation,options);
+    result.refinement=detail::refine_trajectory(planning,result.generation,options);
+    if(request.validate_original_scene||request.obstacle_inflation>0)
+      result.refinement=detail::validate_original_trajectory(request,result.generation,result.refinement,options);
     result.success=result.refinement.success && result.refinement.waypoint_safe && result.refinement.continuous_safe;
     result.status=result.success?"success":result.refinement.status;
     result.message=result.refinement.message;

@@ -354,7 +354,11 @@ else                     success = (md <= stop_min_d_);
 }
 
 
+#ifdef CHITO_GLOBAL_DIAGNOSTICS
+public:
+#else
 private:
+#endif
 // —— 将“本轮/本段”会被复用的局部状态全部清零 ——
 // 注意：这是“局部QP与连续性修补”的运行时状态，
 // 在 private: 增加
