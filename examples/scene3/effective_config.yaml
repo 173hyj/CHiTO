@@ -1,0 +1,51 @@
+formal_method: true
+scene: ../../chito_public/src/collision/scene3.scene
+q_start_rad:
+  - 0.47123889803846897
+  - -1.5707963267948966
+  - 1.5707963267948966
+  - 0
+  - 1.319468914507713
+  - 0
+q_goal_rad:
+  - 1.6929693744344996
+  - -0.81681408993334614
+  - 0.87964594300514198
+  - -0.062831853071795868
+  - 1.7278759594743864
+  - 0
+domain_lb:
+  - -1
+  - -1
+  - 0
+domain_ub:
+  - 1
+  - 1
+  - 1
+base_xyz:
+  - 0
+  - 0
+  - 0
+base_yaw_deg: 180
+random_seed: 20263115
+final_smoothing: false
+translation_convexification: false
+accept_approximate_hull: false
+continuous_collision_refinement: false
+obstacle_inflation: 0
+validate_original_scene: true
+corridor_max_iterations: 200
+sampling_scale: 0.69999999999999996
+ik_max_iterations: 200
+ik_position_tolerance: 0.0001
+optimization_max_iterations: 20
+continuous_repair_passes: 20
+repair_waypoint_limit: 256
+repair_interior_points: 1
+repair_revisit_existing: true
+safety_distance: 0.050000000000000003
+minimum_clearance: 0
+continuous_clearance: 0.0050000000000000001
+continuous_joint_step_deg: 1
+continuous_convexification: true
+export_intermediates: true

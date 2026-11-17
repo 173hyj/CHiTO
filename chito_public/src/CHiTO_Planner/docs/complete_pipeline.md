@@ -31,6 +31,6 @@ ros2 run CHiTO_Planner chito_optimizer --scene scene1 --output results/scene1
 
 每次运行导出 JSON 状态、有效配置、关节轨迹 CSV 和 HTML 连杆回放。启用中间导出后还有原始走廊/IK 节点和 guide。原始副本越出指定走廊时，即使几何无碰撞也保留 `corridor_constraint_failed`，原场景复验不会将它改判成功。
 
-[三场景回放](../../../../benchmarks/split_corridor/README.md)：每场景五组相同输入，完整成功 13/15 → 13/15，几何通过 13/15 → 14/15。改善集中在 scene1；scene2/3 的十组只是增加重合副本与检查开销。scene1 成功案例间隙增加，关节路径也变长。回放固定走廊/IK 结果，不代表端到端随机生成成功率。
+[三个场景示例](../../../../examples/README.md)各保留一组完整文件：可直接运行的配置、走廊与 IK 初始节点、优化后的关节轨迹、状态 JSON 和 HTML 连杆回放。
 
 当前是无条件拆共享节点，尚未实现仅在困难边触发。有限角度细分与端点凸包检查不等价于精确连续碰撞检测。

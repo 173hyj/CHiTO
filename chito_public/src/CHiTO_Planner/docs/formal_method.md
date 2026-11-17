@@ -30,9 +30,9 @@ Splitting is unconditional for internal shared nodes. Selective splitting only o
 | `validate_original_scene` | true | Revalidate against original obstacle geometry |
 | `final_smoothing` | false | Optional smoothing must preserve validity or be rolled back |
 
-The formal method disables torch/gripper geometry in the refinement node, matching the six-link integrated generator and playback. Tool-specific planning remains a separate legacy capability and is not evaluated by the included benchmark.
+The formal method disables torch/gripper geometry in the refinement node, matching the six-link integrated generator and playback. Tool-specific planning remains a separate legacy capability.
 
-Formal mode requires `continuous_convexification: true`. Incompatible `translation_convexification`, `accept_approximate_hull`, and `continuous_collision_refinement` research modes are rejected instead of silently bypassing the split method. They remain available with explicit `formal_method: false`. Optional obstacle inflation changes the planning scene; final validation uses the original scene, and copy membership still refers to the planning corridor. Inflation was not used in the paired evaluation.
+Formal mode requires `continuous_convexification: true`. Incompatible `translation_convexification`, `accept_approximate_hull`, and `continuous_collision_refinement` research modes are rejected instead of silently bypassing the split method. They remain available with explicit `formal_method: false`. Optional obstacle inflation changes the planning scene; final validation uses the original scene, and copy membership still refers to the planning corridor.
 
 ## Code mapping
 
@@ -50,8 +50,8 @@ All paths below are relative to `chito_public/src/CHiTO_Planner`.
 | Final corridor gate | `QPTrajOptNode::refine` and `validate_raw` in `src/hierarchical_opt.cpp` |
 | Public regression | `tests/formal_method_test.cpp` |
 
-## Evidence and limitations
+## Examples and validation
 
-The [paired benchmark](../../../../benchmarks/split_corridor/README.md) includes 15 frozen inputs and 30 full outputs. Both methods obtain 13 strict successes; split geometry passes 14 versus 13. Shared-endpoint strict success constrains endpoints during each local call; split strict success additionally demands all original copies end inside their assigned cells. These are different corridor acceptance scopes.
+Three complete examples are available under [examples/](../../../../examples/README.md), one for each scene. Each includes a portable configuration, corridor/IK seed, optimized trajectory and standalone playback.
 
 The method can fail on collision, corridor infeasibility, solver failure or work budgets. A safe point alone never establishes safe interpolation. Subdivided endpoint hull checking reduces missed interpolation collisions but is not an exact representation of all intermediate rotating link geometry. The tests do not establish hardware execution safety.

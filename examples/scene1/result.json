@@ -1,0 +1,23 @@
+{
+"success":true,
+"status":"success",
+"validation_model":"endpoint_swept_hulls",
+"message":"; final_validation=original_uninflated_scene",
+"seed":20261115,
+"obstacle_inflation":0,
+"final_scene":"original_uninflated",
+"generation_ms":19.080060,
+"optimization_ms":3245.290760,
+"validation_ms":153.274445,
+"total_ms":3452.724374,
+"waypoints":8,
+"minimum_distance":0.008245,
+"normalized_length":2.271366,
+"waypoint_safe":true,
+"continuous_safe":true,
+"smoothing_rolled_back":false,
+"continuous_repairs":0,
+"generation_status":"success",
+"refinement_status":"success",
+"ik_fallback_count":0
+}
