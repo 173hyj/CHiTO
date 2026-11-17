@@ -1,0 +1,10 @@
+# Local ROS/CMake outputs
+/build/
+/install/
+/log/
+/chito_public/build/
+/chito_public/install/
+/chito_public/log/
+/results/
+__pycache__/
+*.pyc

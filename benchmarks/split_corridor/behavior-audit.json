@@ -1,0 +1,80 @@
+{
+  "unchanged_scenes": [
+    {
+      "scene": 2,
+      "trial": 0,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 2,
+      "trial": 1,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 2,
+      "trial": 2,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 2,
+      "trial": 3,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 2,
+      "trial": 4,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 3,
+      "trial": 0,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 3,
+      "trial": 1,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 3,
+      "trial": 2,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 3,
+      "trial": 3,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    },
+    {
+      "scene": 3,
+      "trial": 4,
+      "collapsed_configurations_identical": true,
+      "pair_candidates": 0,
+      "all_copy_gaps_zero": true
+    }
+  ],
+  "untraced_identical": [
+    "scene2_shared_0",
+    "scene2_split_0",
+    "scene3_shared_0",
+    "scene3_split_0"
+  ]
+}

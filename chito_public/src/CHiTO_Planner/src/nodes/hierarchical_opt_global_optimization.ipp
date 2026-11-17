@@ -95,7 +95,7 @@
   // ---------------- QP 调试输出工具 ----------------
   
 Eigen::VectorXd build_collision_linear_term_(
-    const std::vector<Eigen::Matrix<double,6,1>>& path_old) const
+    const std::vector<Eigen::Matrix<double,6,1>>& path_old, double* normalizer=nullptr) const
 {
   const int K = 6;
   const int T = static_cast<int>(path_old.size());
@@ -113,12 +113,12 @@ Eigen::VectorXd build_collision_linear_term_(
   }
 
   double c0max = c0.cwiseAbs().maxCoeff();
-  if (c0max > 1e-12) c0 /= c0max;
+  if (c0max > 1e-12) {c0 /= c0max;if(normalizer)*normalizer=c0max;}
 
   return c0;
 }
 Eigen::VectorXd build_convexset_guidance_c_(
-    const std::vector<Eigen::Matrix<double,6,1>>& path_old) const
+    const std::vector<Eigen::Matrix<double,6,1>>& path_old, double* normalizer=nullptr) const
 {
   const int K = 6;
   const int T = static_cast<int>(path_old.size());
@@ -156,14 +156,14 @@ Eigen::VectorXd build_convexset_guidance_c_(
   }
 
   double m = c_corr.cwiseAbs().maxCoeff();
-  if (m > 1e-12) c_corr /= m;
+  if (m > 1e-12) {c_corr /= m;if(normalizer)*normalizer=m;}
 
   return c_corr;
 }
 
 
 Eigen::VectorXd build_poly_membership_linear_term_(
-    const std::vector<Eigen::Matrix<double,6,1>>& path_old) const
+    const std::vector<Eigen::Matrix<double,6,1>>& path_old, double* normalizer=nullptr) const
 {
   const int K = 6;
   const int T = static_cast<int>(path_old.size());
@@ -214,7 +214,7 @@ Eigen::VectorXd build_poly_membership_linear_term_(
   }
 
   double m = c_poly.cwiseAbs().maxCoeff();
-  if (m > 1e-12) c_poly /= m;
+  if (m > 1e-12) {c_poly /= m;if(normalizer)*normalizer=m;}
 
   return c_poly;
 }
@@ -240,6 +240,7 @@ void build_Q_c_oldstyle_from(const std::vector<Eigen::Matrix<double,6,1>>& path_
                              Eigen::MatrixXd& Q, Eigen::VectorXd& c) const {
   const int K = 6, T = steps_, N = T * K;
   constexpr double eps = 1e-12;
+  global_merit_scales_=GlobalMeritScales{};
 
   // 1) smooth backbone
   Eigen::MatrixXd Q0 = Eigen::MatrixXd::Zero(N, N);
@@ -255,21 +256,21 @@ void build_Q_c_oldstyle_from(const std::vector<Eigen::Matrix<double,6,1>>& path_
   }
 
   double q0max = Q0.cwiseAbs().maxCoeff();
-  if (q0max > eps) Q0 /= q0max;
+  if (q0max > eps) {Q0 /= q0max;global_merit_scales_.smooth=q0max;}
 
 // 2) collision linear term
-Eigen::VectorXd c_col = build_collision_linear_term_(path_old);
+Eigen::VectorXd c_col = build_collision_linear_term_(path_old,&global_merit_scales_.collision);
 
 // 3) anchor guidance term
 Eigen::VectorXd c_corr = Eigen::VectorXd::Zero(N);
 if (use_convexset_guidance_ && guide_.loaded) {
-  c_corr = build_convexset_guidance_c_(path_old);
+  c_corr = build_convexset_guidance_c_(path_old,&global_merit_scales_.anchor);
 }
 
 // 4) NEW: poly half-space membership penalty term
 Eigen::VectorXd c_poly = Eigen::VectorXd::Zero(N);
 if (use_convexset_guidance_ && use_poly_membership_penalty_ && guide_.loaded) {
-  c_poly = build_poly_membership_linear_term_(path_old);
+  c_poly = build_poly_membership_linear_term_(path_old,&global_merit_scales_.poly);
 }
 
 // 5) assemble
@@ -285,6 +286,7 @@ double Mq = Q.cwiseAbs().maxCoeff();
 double Mc = c.cwiseAbs().maxCoeff();
 double S  = std::max(Mq, Mc);
 if (S > 1e6) {
+  global_merit_scales_.overall=S;
   Q /= S;
   c /= S;
 }
@@ -337,7 +339,7 @@ void one_iter_step() {
   const double m_old       = model_value(Q, c, x0);
   const double smooth_old  = smooth_cost(path_old);
   const double penalty_old = true_penalty(path_old);
-  const double t_old       = smooth_old + penalty_old;
+  const double t_old       = global_actual_merit_(path_old);
 
   // 3) trust-region 边界生成器
   auto make_bounds = [&](double trust) {
@@ -416,7 +418,7 @@ void one_iter_step() {
     // === TrueImprove: 用真实轨迹代价 t = smooth + penalty ===
     const double smooth_new  = smooth_cost(path_new);
     const double penalty_new = true_penalty(path_new);
-    const double t_new       = smooth_new + penalty_new;
+    const double t_new       = global_actual_merit_(path_new);
     const double TI          = t_old - t_new;              // TrueImprove
 
    // 当前全局 mu
@@ -437,7 +439,9 @@ RCLCPP_INFO(get_logger(),
 
 
     // 如果模型预测改进足够大 -> 正常接受
-    if (MI > mi_thresh_) {
+    const bool acceptable=global_actual_acceptance_?global_candidate_acceptable_(MI,TI):(MI>mi_thresh_);
+    trace_global_candidate_("interactive",attempt,MI,t_old,t_new,acceptable,false);
+    if (acceptable) {
       path_    = std::move(path_new);
       trust_s_ = std::min(trust_s_max_, trust_s_ + tau_plus_);
       accepted = true;
@@ -463,9 +467,10 @@ RCLCPP_INFO(get_logger(),
     }
 
     // 已经到最后一次 / 已经在 trust 最小值附近：如果有可行解就强制接受
-    if (last_sol.solved) {
+    if (!global_actual_acceptance_ && last_sol.solved) {
       path_    = std::move(path_candidate_last);
       accepted = true;
+      trace_global_candidate_("interactive",attempt,MI,t_old,t_new,true,true);
       trust_s_ = std::min(
         trust_s_max_,
         std::max(trust_s_, trust_s_min_ + 0.05)
@@ -481,6 +486,7 @@ RCLCPP_INFO(get_logger(),
     RCLCPP_INFO(get_logger(),
       "[ITER %d] no accepted step",
       cur_iter_ + 1);
+    if(global_actual_acceptance_)++cur_iter_;
     return;
   }
 

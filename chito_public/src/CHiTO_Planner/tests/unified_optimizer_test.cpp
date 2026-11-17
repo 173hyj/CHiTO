@@ -31,6 +31,11 @@ int main() {
   for(size_t i=0;i<first.refinement.trajectory.size();++i)
     assert((first.refinement.trajectory[i]-second.refinement.trajectory[i]).norm()<1e-9);
   assert(rclcpp::ok()==global_context_before);
+  request.formal_method=false;
+  // This block tests the historical envelope variants with their original
+  // unsplit edge settings; formal defaults are exercised above and separately.
+  request.continuous_joint_step_deg=0.;request.continuous_clearance=0.;
+  request.continuous_convexification=false;request.repair_revisit_existing=false;
   request.translation_convexification=true;
   auto protected_path=optimizer.solve(request);
   std::regex point_margins("baseline_point_min=([-0-9.]+), final_point_min=([-0-9.]+)");
@@ -38,14 +43,32 @@ int main() {
   assert(std::regex_search(protected_path.refinement.message,point_match,point_margins));
   const double before=std::stod(point_match[1]),after=std::stod(point_match[2]);
   assert(before<0. || after>=0.);
+  request.continuous_collision_refinement=true;
+  auto lower_result=optimizer.solve(request);
+  std::smatch edge_match;
+  assert(std::regex_search(lower_result.refinement.message,edge_match,std::regex("residual_edges_before=([0-9]+), residual_edges_after=([0-9]+)")));
+  assert(std::stoi(edge_match[2])<=std::stoi(edge_match[1]));
+  request.continuous_collision_refinement=false;
   request.translation_convexification=false;
+  request.obstacle_inflation=-.01;
+  assert(optimizer.solve(request).status=="invalid_input");
+  request.obstacle_inflation=.01;request.validate_original_scene=true;
+  auto inflated_result=optimizer.solve(request);
+  assert(inflated_result.generation.success);
+  assert(inflated_result.refinement.message.find("final_validation=original_uninflated_scene")!=std::string::npos);
+  request.obstacle_inflation=0.;request.validate_original_scene=false;
   const auto dir=std::filesystem::temp_directory_path()/std::filesystem::path("chito-contract-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  request.repair_interior_points=3;
+  request.continuous_convexification=true;
   request.output_directory=dir.string();request.export_intermediates=true;
   auto exported=optimizer.solve(request);assert(exported.export_success);
   auto guide=YAML::LoadFile((dir/"guide.yaml").string());
   assert(guide["q_seed_dense"].size()==exported.generation.seed.size());
   for(const auto& row:guide["q_seed_dense"])assert(row.IsSequence() && row.size()==6);
   auto restored=chito_planner::read_optimizer_config((dir/"effective_config.yaml").string());
+  assert(restored.repair_interior_points==3);
+  assert(restored.formal_method==request.formal_method);
+  assert(exported.refinement.trajectory.size()<=static_cast<size_t>(request.repair_waypoint_limit));
   assert((restored.q_start-request.q_start).norm()<1e-14);
   assert(std::filesystem::file_size(dir/"playback.html")>1000);
   std::filesystem::remove_all(dir);

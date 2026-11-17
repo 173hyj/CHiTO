@@ -384,7 +384,7 @@ ConvexHullData make_link_swept_hull_data_(const LinkBox& lbA, const LinkBox& lbB
 
 
 
-  double edge_swept_clearance_(const Eigen::Matrix<double,6,1>& qA,
+  double edge_endpoint_hull_clearance_(const Eigen::Matrix<double,6,1>& qA,
                                      const Eigen::Matrix<double,6,1>& qB) const {
   if (obstacles_.empty()) return 1e3;
   double clearance=1e3;
@@ -436,7 +436,7 @@ ConvexHullData make_link_swept_hull_data_(const LinkBox& lbA, const LinkBox& lbB
 
 
 
-    bool edge_continuous_safe_convexbox_(const Eigen::Matrix<double,6,1>& qA,
+    bool edge_endpoint_hull_safe_(const Eigen::Matrix<double,6,1>& qA,
                                      const Eigen::Matrix<double,6,1>& qB) const {
   if (obstacles_.empty()) return true;
 
@@ -488,6 +488,39 @@ ConvexHullData make_link_swept_hull_data_(const LinkBox& lbA, const LinkBox& lbB
 
 
 
+
+
+  int edge_joint_subdivisions_(const Eigen::Matrix<double,6,1>& a,
+                               const Eigen::Matrix<double,6,1>& b) const {
+    if(!(continuous_joint_step_deg_>0.)) return 1;
+    const double step=continuous_joint_step_deg_*M_PI/180.;
+    const double count=std::ceil((b-a).cwiseAbs().maxCoeff()/step);
+    if(!std::isfinite(count)||count>10000.)throw std::runtime_error("Joint subdivision budget exceeded");
+    return std::max(1,static_cast<int>(count));
+  }
+  double edge_swept_clearance_(const Eigen::Matrix<double,6,1>& a,
+                                const Eigen::Matrix<double,6,1>& b) const {
+    const int n=edge_joint_subdivisions_(a,b);
+    if(n==1)return edge_endpoint_hull_clearance_(a,b);
+    double result=std::numeric_limits<double>::infinity();
+    Eigen::Matrix<double,6,1> left=a;
+    for(int i=1;i<=n;++i){
+      Eigen::Matrix<double,6,1> right=a+(double(i)/n)*(b-a);if(i==n)right=b;
+      result=std::min(result,edge_endpoint_hull_clearance_(left,right));left=right;
+    }
+    return result;
+  }
+  bool edge_continuous_safe_convexbox_(const Eigen::Matrix<double,6,1>& a,
+                                       const Eigen::Matrix<double,6,1>& b) const {
+    const int n=edge_joint_subdivisions_(a,b);
+    if(n==1)return edge_endpoint_hull_safe_(a,b);
+    Eigen::Matrix<double,6,1> left=a;
+    for(int i=1;i<=n;++i){
+      Eigen::Matrix<double,6,1> right=a+(double(i)/n)*(b-a);if(i==n)right=b;
+      if(!edge_endpoint_hull_safe_(left,right))return false;left=right;
+    }
+    return true;
+  }
 
   // ---------------- 违规项/真实代价 ----------------
   struct Violation {

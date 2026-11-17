@@ -1,3 +1,5 @@
+> Historical raw-node documentation. For current supported defaults see [formal_method.md](formal_method.md) and [unified_optimizer.md](unified_optimizer.md).
+
 # Method-to-Code Mapping
 
 This note summarizes how the main modules of the CHiTO framework are organized in the software, making the corridor construction, IK initialization, optimization, and safety-checking stages easy to inspect.

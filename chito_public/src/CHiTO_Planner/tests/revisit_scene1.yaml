@@ -1,0 +1,51 @@
+accept_approximate_hull: false
+base_xyz:
+- 0
+- 0
+- 0
+base_yaw_deg: 180
+continuous_clearance: 0
+continuous_collision_refinement: false
+continuous_convexification: true
+continuous_repair_passes: 20
+corridor_max_iterations: 200
+domain_lb:
+- -1
+- -1
+- 0
+domain_ub:
+- 1
+- 1
+- 1
+export_intermediates: true
+final_smoothing: false
+ik_max_iterations: 200
+ik_position_tolerance: 0.0001
+minimum_clearance: 0
+obstacle_inflation: 0
+optimization_max_iterations: 20
+q_goal_rad:
+- 1.6929693744344996
+- -0.8168140899333461
+- 0.879645943005142
+- -0.06283185307179587
+- 1.7278759594743864
+- 0
+q_start_rad:
+- 0.47123889803846897
+- -1.5707963267948966
+- 1.5707963267948966
+- 0
+- 1.319468914507713
+- 0
+random_seed: 20261115
+repair_interior_points: 1
+repair_revisit_existing: true
+repair_waypoint_limit: 256
+safety_distance: 0.05
+sampling_scale: 0.7
+scene: ../../collision/scene1.scene
+translation_convexification: false
+validate_original_scene: true
+
+formal_method: false

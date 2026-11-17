@@ -1,4 +1,7 @@
 void reset_global_state_on_new_package_() {
+  if(!corridor_original_sigma_.empty())guide_.sigma_dense=corridor_original_sigma_;
+  corridor_original_sigma_.clear();corridor_provenance_.clear();
+  split_corridor_initialized_=false;split_copy_roles_.clear();split_source_nodes_.clear();
   // 1) 恢复超参到“基线默认值”
   mu_          = mu_base_;          // 基线值在构造时保存
   trust_s_     = trust_s_base_;
@@ -150,4 +153,3 @@ ConvexSetGuideData guide_;
  // NEW: 是否在每次构造 QP 时输出 Q/c
 
   mutable size_t last_sub_count_{std::numeric_limits<size_t>::max()};
-
